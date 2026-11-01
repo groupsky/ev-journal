@@ -69,3 +69,8 @@ the first recompute is done). `null` means "use the computed label". `ev_journey
 `place_id` or `route_id`. The client queues offline and sends later. The first
 post of a `client_id` returns `201`; a repeat returns `200` with the stored
 command and changes nothing.
+
+## Away charges
+
+`POST /charges/{id}/receipt`, `GET /questions` and
+`POST /questions/{id}/answer`: see [charges.md](charges.md).

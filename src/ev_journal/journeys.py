@@ -40,6 +40,7 @@ class Charge:
     start: int
     end: int
     kwh: float | None = None  # kWh into the battery
+    type: str = "unknown"  # AC, DC or unknown (homy charge_type)
     place: Place | None = None
 
 
@@ -169,6 +170,8 @@ class Result:
     journeys: list[Journey]
     outings: list[Outing]
     months: list[Month]
+    charges: list[Charge] = field(default_factory=list)
+    track: "Track | None" = None
 
 
 class Track:
@@ -325,7 +328,9 @@ def build(
     ms = sorted(months.values(), key=lambda m: m.start)
     if odometer:
         _odometer_check(ms, sorted(odometer), tz)
-    return Result(trips=trips, journeys=journeys, outings=outings, months=ms)
+    return Result(
+        trips=trips, journeys=journeys, outings=outings, months=ms, charges=charges, track=track
+    )
 
 
 def _odometer_check(months: list[Month], odo: list, tz: ZoneInfo) -> None:

@@ -6,12 +6,15 @@ run: read, recompute everything, write to InfluxDB and MQTT once.
 dry-run: read and recompute, print counts per month, write nothing.
 """
 
+import shutil
 import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import cleanup, outputs, places, source
+from ev_journal import charges, cleanup, outputs, places, source
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build
 from ev_journal.settings import Settings
@@ -41,6 +44,25 @@ def compute(s: Settings) -> Result:
     )
 
 
+def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
+    """Update the station feed (daily) and the away charges in the store."""
+    data_dir = data_dir or s.data_dir
+    db = places.open_store(data_dir)
+    try:
+        now = int(time.time() * 1000)
+        cache = data_dir / "fines-locations.geojson"
+        args = (fetch,) if fetch else ()
+        status = charges.update_stations(db, cache, now, *args)
+        charges.sync(db, r, places.all_places(db), now)
+        return status
+    finally:
+        db.close()
+
+
+def _no_fetch(url: str) -> bytes:
+    raise RuntimeError("dry-run: cache only")
+
+
 def run(s: Settings) -> Result:
     r = compute(s)
     db = Influx(s.influx_url, s.influx_db, s.influx_write_user, s.influx_write_password)
@@ -52,9 +74,13 @@ def run(s: Settings) -> Result:
         mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
     reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     deleted = cleanup.cleanup(reader, db, r)
+    try:
+        feed = away(s, r)
+    except Exception as e:  # the main outputs are written already
+        feed = f"failed: {e!r}"
     print(
         f"ev-journal: {len(r.trips)} trips, {len(r.journeys)} journeys, {len(lines)} rows, "
-        f"{deleted} stale deleted"
+        f"{deleted} stale deleted, station feed {feed}"
     )
     return r
 
@@ -108,6 +134,27 @@ def dry_run(s: Settings) -> None:
         labels[j.label] = labels.get(j.label, 0) + 1
     placed = sum(j.start_place is not None and j.end_place is not None for j in r.journeys)
     print(f"labels: {labels}; journeys with both places known: {placed}/{len(r.journeys)}")
+    # Work on a copy of the store, from the feed cache only: nothing is written
+    # anywhere, and the Fines API is not called.
+    tmp = Path(tempfile.mkdtemp(prefix="evj-dry-"))
+    for name in ("ev-journal.sqlite", "fines-locations.geojson"):
+        if (s.data_dir / name).exists():
+            shutil.copy2(s.data_dir / name, tmp / name)
+    try:
+        print(f"station feed: {away(s, r, tmp, _no_fetch)}")
+        db = places.open_store(tmp)
+        rows = db.execute("SELECT id, match FROM charges WHERE at_home = 0 ORDER BY id").fetchall()
+        first = next((cid for cid, how in rows if how in ("ok", "unsure")), None)
+        since = [how for cid, how in rows if first is not None and cid >= first]
+        counts = {k: since.count(k) for k in sorted(set(since))}
+        share = (counts.get("ok", 0) + counts.get("unsure", 0)) / len(since) * 100 if since else 0
+        print(
+            f"away charges: {len(rows)}; since the first matched one: {len(since)}, {counts},"
+            f" matched {share:.0f} %"
+        )
+        db.close()
+    finally:
+        shutil.rmtree(tmp)
 
 
 def main() -> None:
