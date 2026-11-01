@@ -74,3 +74,10 @@ command and changes nothing.
 
 `POST /charges/{id}/receipt`, `GET /questions` and
 `POST /questions/{id}/answer`: see [charges.md](charges.md).
+
+## Advice
+
+`GET /advice`: tomorrow's forecast and charging advice from the last
+recompute, the same object as `advice` in the MQTT summary
+([forecast.md](forecast.md)). `404` before the first recompute, or when
+there is no forecast (too little history, or no SoC known).

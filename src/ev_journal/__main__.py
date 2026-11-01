@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import charges, cleanup, homecharge, outputs, places, price, source
+from ev_journal import charges, cleanup, forecast, homecharge, outputs, places, price, source
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build, month_key
 from ev_journal.settings import Settings
@@ -46,7 +46,22 @@ def compute(s: Settings) -> Result:
     home = source.home_costs(db)
     price.apply(r, {**away_costs, **home}, set(home), ZoneInfo(s.tz))
     home_charge_model(s, db, r, set(home), end)
+    advice(s, db, r)
     return r
+
+
+def advice(s: Settings, db: Influx, r: Result) -> None:
+    """Tomorrow's forecast and charging advice (#9)."""
+    tz, now = ZoneInfo(s.tz), int(time.time() * 1000)
+    y = time.gmtime().tm_year
+    try:
+        hols = forecast.holiday_set(s.holidays_country, s.days_off, range(y - 2, y + 2))
+    except (ValueError, NotImplementedError) as e:  # a bad EVJ_HOLIDAYS or EVJ_DAYS_OFF
+        print(f"ev-journal: no advice: {e!r}", file=sys.stderr)
+        return
+    soc = r.home_charge["soc_now"] if r.home_charge else source.last_soc(db, now)
+    kpp = r.soc_model.kwh_per_pct if r.soc_model else homecharge.DEFAULT_KWH_PER_PCT
+    r.advice = forecast.plan(r, tz, now, soc, kpp, hols, s.departure, s.reserve_pct, s.preheat)
 
 
 def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: int) -> None:
@@ -66,6 +81,7 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
                 )
             )
     r.backtest = homecharge.backtest(hc)
+    r.soc_model = homecharge.fit(hc)
     months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
     for m in r.months:
         if mm := months.get(m.key):
@@ -81,7 +97,7 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
     ]
     soc = source.last_soc(db, bs[0].start) if bs else None
     real_now = int(time.time() * 1000)
-    r.home_charge = homecharge.live(bs, soc, homecharge.fit(hc), real_now, s.soc_target)
+    r.home_charge = homecharge.live(bs, soc, r.soc_model, real_now, s.soc_target)
 
 
 def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
@@ -141,6 +157,7 @@ def serve_api(s: Settings, state: dict) -> None:
         ZoneInfo(s.tz),
         lambda: state["stops"],
         lambda: state["journeys"],
+        lambda: state["advice"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -204,6 +221,17 @@ def dry_run(s: Settings) -> None:
                 f"{m.key}  kWh per % {k}  meter ratio {m.meter_ratio:.3f}"
                 f"  overhead {m.overhead_kwh:.2f} kWh  drift: {m.drift_flag or '-'}"
             )
+    print("forecast back-test (last 91 days): days, bad day covers, normal day error")
+    for dtype, sc in forecast.score(r.forecasts).items():
+        print(
+            f"  {dtype:8s} {sc['days']:3d}  {sc['covered_pct']:5.1f} %"
+            f"  {sc['normal_error_kwh']:.1f} kWh"
+        )
+    if r.advice:
+        print(
+            f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
+            f" level {r.advice['level']}, capped {r.advice['capped']}"
+        )
     labels = {}
     for j in r.journeys:
         labels[j.label] = labels.get(j.label, 0) + 1
@@ -240,7 +268,7 @@ def main() -> None:
     elif cmd == "run":
         run(s)
     elif cmd == "loop":
-        state = {"stops": [], "journeys": []}
+        state = {"stops": [], "journeys": [], "advice": None}
         if s.api_token:
             serve_api(s, state)
         while True:
@@ -248,6 +276,7 @@ def main() -> None:
                 r = run(s)
                 state["stops"] = journey_ends(r)
                 state["journeys"] = [(j.start, j.end) for j in r.journeys]
+                state["advice"] = r.advice
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
             time.sleep(s.interval_sec)

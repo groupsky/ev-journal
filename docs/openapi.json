@@ -1,6 +1,114 @@
 {
   "components": {
     "schemas": {
+      "Advice": {
+        "description": "Tomorrow's energy need and how to charge for it (docs/forecast.md).",
+        "properties": {
+          "bad_kwh": {
+            "title": "Bad Kwh",
+            "type": "number"
+          },
+          "capped": {
+            "title": "Capped",
+            "type": "boolean"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "day_type": {
+            "enum": [
+              "workday",
+              "weekend",
+              "holiday"
+            ],
+            "title": "Day Type",
+            "type": "string"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "mid",
+                  "high"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "normal_kwh": {
+            "title": "Normal Kwh",
+            "type": "number"
+          },
+          "preheat_off": {
+            "title": "Preheat Off",
+            "type": "boolean"
+          },
+          "score": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Score"
+            },
+            "title": "Score",
+            "type": "object"
+          },
+          "soc_now": {
+            "title": "Soc Now",
+            "type": "number"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "target": {
+            "title": "Target",
+            "type": "number"
+          }
+        },
+        "required": [
+          "day",
+          "day_type",
+          "normal_kwh",
+          "bad_kwh",
+          "soc_now",
+          "target",
+          "level",
+          "start",
+          "end",
+          "capped",
+          "preheat_off",
+          "message",
+          "score"
+        ],
+        "title": "Advice",
+        "type": "object"
+      },
       "AnswerIn": {
         "properties": {
           "text": {
@@ -642,6 +750,29 @@
         "title": "RouteList",
         "type": "object"
       },
+      "Score": {
+        "properties": {
+          "covered_pct": {
+            "title": "Covered Pct",
+            "type": "number"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "normal_error_kwh": {
+            "title": "Normal Error Kwh",
+            "type": "number"
+          }
+        },
+        "required": [
+          "days",
+          "covered_pct",
+          "normal_error_kwh"
+        ],
+        "title": "Score",
+        "type": "object"
+      },
       "Suggestion": {
         "properties": {
           "lat": {
@@ -708,6 +839,54 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/advice": {
+      "get": {
+        "operationId": "get_advice_advice_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Advice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Advice"
+      }
+    },
     "/charges/{charge_id}/receipt": {
       "post": {
         "description": "A receipt for a charge. It replaces an answer or an estimate.",

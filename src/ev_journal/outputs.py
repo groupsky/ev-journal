@@ -76,6 +76,20 @@ def influx_lines(r: Result) -> list[str]:
                 o.start,
             )
         )
+    for f in r.forecasts:
+        out.append(
+            line(
+                "ev_forecast",
+                {},
+                {
+                    "day_type": f.day_type,
+                    "normal_kwh": f.normal_kwh,
+                    "bad_kwh": f.bad_kwh,
+                    "real_kwh": f.real_kwh,
+                },
+                f.start,
+            )
+        )
     for m in r.months:
         out.append(
             line(
@@ -164,6 +178,7 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
         "journeys": last,
         "month": month,
         "home_charge": _home_charge(r.home_charge),
+        "advice": r.advice,
     }
 
 

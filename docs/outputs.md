@@ -85,6 +85,12 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 A field that is empty this run (`null`) is not written, so an old value stays.
 `drift_flag` is always written, so an old flag is cleared.
 
+### `ev_forecast` — one row per day, at its first ms (local time)
+
+The forecast of each of the last 91 full days, made only from the days
+before it, next to the real need ([forecast.md](forecast.md)). Fields
+`day_type`, `normal_kwh`, `bad_kwh`, `real_kwh`.
+
 ### `ev_track` — track points for Grafana's Geomap
 
 Tag `journey` = the journey id. Fields `lat`, `lon`. The real fixes of the
@@ -130,11 +136,19 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
             "kwh_per_100km": 5.8, "drift_flag": ""},
   "home_charge": {"running": true, "since": "…Z", "soc_plugin": 30.0, "soc_now": 52.4,
                   "meter_kwh": 8.6, "target": 80.0, "meter_kwh_to_target": 9.4,
-                  "min_to_target": 462}
+                  "min_to_target": 462},
+  "advice": {"day": "2026-01-11", "day_type": "weekend", "normal_kwh": 6.6, "bad_kwh": 14.2,
+             "soc_now": 40.0, "target": 60, "level": "low", "start": "…", "end": "…",
+             "capped": false, "preheat_off": false, "message": "Утре: …",
+             "score": {"all": {"days": 91, "covered_pct": 92.3, "normal_error_kwh": 3.7}}}
 }
 ```
 
 `journeys` holds the last 10, newest first. `month` is the current month.
+
+`advice` is tomorrow's forecast and charging advice ([forecast.md](forecast.md)),
+or `null`. `start` and `end` are local ISO times; `level` is `null` when no
+charge is needed. `score` holds the back-test per day type and `all`.
 
 `home_charge` is the SoC estimate of a home charge since the car last came
 home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`

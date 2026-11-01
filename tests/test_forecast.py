@@ -1,0 +1,192 @@
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from ev_journal import forecast
+from ev_journal.forecast import advise, backtest, day_type, message, night_zone, plan
+from ev_journal.journeys import Journey, Result, Trip
+
+UTC = ZoneInfo("UTC")
+KPP = 0.30  # kWh per %
+WINTER = night_zone(date(2026, 1, 12), UTC)  # 22:00–06:00
+SUMMER = night_zone(date(2026, 7, 13), UTC)  # 23:00–07:00
+
+
+def at(d, h, m=0):
+    return datetime.combine(d, time(h, m), UTC)
+
+
+def test_night_zones():
+    assert WINTER == (at(date(2026, 1, 12), 22), at(date(2026, 1, 13), 6))
+    assert SUMMER == (at(date(2026, 7, 13), 23), at(date(2026, 7, 14), 7))
+    # The zone of the evening's date: 31 March is winter, 1 April summer.
+    assert night_zone(date(2026, 3, 31), UTC)[0].hour == 22
+    assert night_zone(date(2026, 4, 1), UTC)[0].hour == 23
+    assert night_zone(date(2026, 10, 31), UTC)[0].hour == 23
+    assert night_zone(date(2026, 11, 1), UTC)[0].hour == 22
+
+
+def test_low_level_reaches_the_target():
+    # 6 kWh bad day = 20 % + 10 % reserve = 30 %; from 20 %: 10 % = 3 kWh, 3.26 h at low.
+    a = advise(20, 6.0, KPP, WINTER, None, 10)
+    assert (a.target, a.level, a.capped) == (30, "low", False)
+    assert a.end == WINTER[1]  # as late as the zone allows
+    assert a.start == a.end - timedelta(hours=3, minutes=30)  # rounded up to 15 min
+
+
+def test_only_mid_or_high_reaches():
+    # 15 kWh = 50 % + 10 % = 60 %; from 20 %: 40 % = 12 kWh.
+    # Summer zone 8 h: low 13.0 h, mid 7.5 h (fits).
+    a = advise(20, 15.0, KPP, SUMMER, None, 10)
+    assert (a.target, a.level) == (60, "mid")
+    assert a.start == SUMMER[1] - timedelta(hours=7, minutes=30)
+    # Departure inside the zone leaves 6 h: only high (5.13 h) fits.
+    a = advise(20, 15.0, KPP, SUMMER, at(date(2026, 7, 14), 5), 10)
+    assert (a.level, a.end) == ("high", at(date(2026, 7, 14), 5))
+    assert a.start == a.end - timedelta(hours=5, minutes=15)
+
+
+def test_target_above_what_the_zone_reaches():
+    a = advise(10, 27.0, KPP, WINTER, None, 10)  # wants 100 %
+    assert a.capped and a.level == "high"
+    assert (a.start, a.end) == WINTER
+    assert a.target == 10 + int(8 * 2.34 / KPP)  # 72 %
+
+
+def test_no_charge_needed():
+    a = advise(55, 6.0, KPP, WINTER, None, 10)
+    assert a.level is None and a.target == 30
+    f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
+    assert message(f, 55, a, False) == (
+        "Утре: около 4 kWh (лош ден 6). Сега 55 %. Не е нужно зареждане тази вечер."
+    )
+
+
+def test_message_with_a_charge():
+    f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
+    a = advise(20, 6.0, KPP, WINTER, None, 10)
+    assert message(f, 20, a, False) == (
+        "Утре: около 4 kWh (лош ден 6). Сега 20 %. Нужни 30 % при тръгване."
+        " Задай: ниско, 02:30–06:00."
+    )
+
+
+def test_day_types():
+    hol = {date(2026, 1, 14)}
+    assert day_type(date(2026, 1, 13), hol) == "workday"
+    assert day_type(date(2026, 1, 14), hol) == "holiday"
+    assert day_type(date(2026, 1, 17), hol) == "weekend"
+
+
+def test_forecast_and_backtest():
+    # Workdays 5 kWh, weekend days 20 kWh, 6 weeks from Monday 2026-01-05.
+    d0 = date(2026, 1, 5)
+    need = {d0 + timedelta(days=i): 0.0 for i in range(42)}
+    for d in need:
+        need[d] = 20.0 if d.weekday() >= 5 else 5.0
+    f = forecast.forecast(need, date(2026, 2, 16), set())
+    assert (f.day_type, f.normal_kwh, f.bad_kwh) == ("workday", 5.0, 7.0)
+    f = forecast.forecast(need, date(2026, 2, 14), set())
+    assert (f.day_type, f.normal_kwh, f.bad_kwh) == ("weekend", 20.0, 22.0)
+    fs = backtest(need, set())
+    assert len(fs) == 42 - 6  # each pool needs 3 days of its kind first
+    sc = forecast.score(fs)
+    assert sc["all"]["covered_pct"] > 90
+
+
+def result(days: int, kwh: float, not_me_day: int | None = None) -> Result:
+    d0 = date(2026, 1, 5)  # a Monday
+    trips, journeys = [], []
+    for i in range(days):
+        t0 = int(at(d0 + timedelta(days=i), 8).timestamp() * 1000)
+        t = Trip(start=t0, end=t0 + 3_600_000, kwh=kwh)
+        trips.append(t)
+        journeys.append(Journey(trips=[t], stops=[], not_me=i == not_me_day))
+    return Result(trips=trips, journeys=journeys, outings=[], months=[])
+
+
+def test_not_me_days_are_left_out():
+    r = result(10, 5.0, not_me_day=2)
+    need = forecast.daily_need(r, UTC, date(2026, 1, 14))
+    assert need[date(2026, 1, 7)] == 0.0
+    assert need[date(2026, 1, 8)] == 5.0
+
+
+def test_plan_on_a_holiday_with_preheat():
+    r = result(28, 5.0)
+    now = int(at(date(2026, 2, 2), 20).timestamp() * 1000)  # evening before Tuesday 3rd
+    hols = forecast.holiday_set(None, ("2026-02-03",), range(2026, 2027))
+    a = plan(r, UTC, now, 50.0, KPP, hols, departure="05:15", preheat=True)
+    assert a["day"] == "2026-02-03" and a["day_type"] == "holiday"
+    assert a["preheat_off"] is True
+    assert a["message"].endswith("Утре е почивен ден: изключи затоплянето.")
+    assert r.forecasts and r.forecasts[-1].real_kwh is not None
+    # A workday: no preheat message, and the departure ends the charge.
+    a = plan(r, UTC, now, 5.0, KPP, set(), departure="05:00", preheat=True)
+    assert a["day_type"] == "workday" and not a["preheat_off"]
+    assert a["end"] == at(date(2026, 2, 3), 5).isoformat()
+
+
+def test_plan_after_midnight_is_for_today():
+    r = result(28, 5.0)
+    now = int(at(date(2026, 2, 3), 1).timestamp() * 1000)
+    assert plan(r, UTC, now, 50.0, KPP, set())["day"] == "2026-02-03"
+
+
+def test_plan_without_soc_or_history():
+    now = int(at(date(2026, 2, 2), 20).timestamp() * 1000)
+    assert plan(result(28, 5.0), UTC, now, None, KPP, set()) is None
+    assert plan(result(0, 5.0), UTC, now, 50.0, KPP, set()) is None
+
+
+def test_official_holidays():
+    pytest.importorskip("holidays")
+    hols = forecast.holiday_set("GB", (), range(2026, 2027))
+    assert date(2026, 12, 25) in hols
+
+
+def test_api(client, advice):
+    assert client.get("/advice").status_code == 404
+    r = result(28, 5.0)
+    now = int(at(date(2026, 2, 2), 20).timestamp() * 1000)
+    advice["value"] = plan(r, UTC, now, 20.0, KPP, set())
+    got = client.get("/advice")  # checked against docs/openapi.json
+    assert got.status_code == 200
+    assert got.json()["level"] == "low"
+    assert got.json()["score"]["all"]["days"] == len(r.forecasts)
+
+
+DST = ZoneInfo("Europe/Lisbon")  # any zone with EU summer time
+
+
+def real_h(a):
+    """Real hours between start and end (same-zone subtraction uses clock time)."""
+    return (a.end.astimezone(UTC) - a.start.astimezone(UTC)).total_seconds() / 3600
+
+
+def test_the_nights_the_clocks_change():
+    # 2026-03-28/29: the zone is 7 real hours.
+    z = night_zone(date(2026, 3, 28), DST)
+    a = advise(20, 9.0, KPP, z, None, 10)  # wants 40 %
+    assert a.level == "low"  # 6.52 h → 6.75 h fits in 7 h
+    assert real_h(a) == 6.75
+    assert a.start.hour == 22 and a.start.minute == 15
+    a = advise(10, 27.0, KPP, z, None, 10)
+    assert a.capped and a.target == 10 + int(7 * 2.34 / KPP)  # 64 %, not 72 %
+    # 2026-10-24/25: 9 real hours.
+    z = night_zone(date(2026, 10, 24), DST)
+    a = advise(20, 9.0, KPP, z, None, 15)  # wants 45 %: 25 % = 7.5 kWh, 8.15 h at low
+    assert a.level == "low" and a.start.utcoffset() != a.end.utcoffset()
+    assert real_h(a) == 8.25
+
+
+def test_departure_after_the_zone_ends():
+    a = advise(20, 6.0, KPP, WINTER, at(date(2026, 1, 13), 8), 10)
+    assert a.end == WINTER[1]
+
+
+def test_after_midnight_the_start_is_not_in_the_past():
+    now = at(date(2026, 1, 13), 3)
+    a = advise(20, 6.0, KPP, WINTER, None, 10, now)  # 3.5 h at low does not fit in 3 h
+    assert a.level == "mid" and a.start >= now

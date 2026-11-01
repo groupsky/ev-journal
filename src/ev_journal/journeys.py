@@ -213,6 +213,9 @@ class Result:
     track: "Track | None" = None
     home_charge: dict | None = None  # the live estimate (homecharge.live)
     backtest: list[float] = field(default_factory=list)  # end SoC errors, %
+    soc_model: "object | None" = None  # homecharge.Model of all home charges
+    forecasts: list = field(default_factory=list)  # forecast.Forecast, scored days
+    advice: dict | None = None  # tomorrow's forecast and charging advice
 
 
 class Track:
