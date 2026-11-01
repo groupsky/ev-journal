@@ -51,5 +51,13 @@ def test_departures_and_day_types():
     assert Settings.from_env({}).timer_step_min == 15
     with pytest.raises(ValueError):
         Settings.from_env({"EVJ_DAY_TYPES": "alt:2026-01-09..2026-01-05"})
-    with pytest.raises(ValueError):
-        Settings.from_env({"EVJ_DEPARTURE_ALT": "soon"})
+    bad = [
+        {"EVJ_DEPARTURE_ALT": "soon"},
+        {"EVJ_DEPARTURE_TYPO": "05:00"},  # no such day type
+        {"EVJ_DAY_TYPES": "weekend:2026-01-05..2026-01-09"},  # a built-in name
+        {"EVJ_DAY_TYPES": ":2026-01-05..2026-01-09"},
+        {"EVJ_TIMER_STEP_MIN": "0"},
+    ]
+    for env in bad:
+        with pytest.raises(ValueError):
+            Settings.from_env(env)

@@ -147,8 +147,9 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
 `journeys` holds the last 10, newest first. `month` is the current month.
 
 `advice` is tomorrow's forecast and charging advice ([forecast.md](forecast.md)),
-or `null`. `start`, `end` and `departure` are local ISO times; `level` is `null` when no
-charge is needed. `score` holds the back-test per day type and `all`.
+or `null`. `start`, `end` and `departure` are local ISO times; `level` is
+`null` when no charge is needed. `score` holds the back-test per day type and
+`all` (extra day types count as workdays there).
 
 `home_charge` is the SoC estimate of a home charge since the car last came
 home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`

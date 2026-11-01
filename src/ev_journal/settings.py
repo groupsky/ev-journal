@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import date, time
 from pathlib import Path
 
+# Every env name with this prefix is read as a departure of one day type.
 DEPARTURE_PREFIX = "EVJ_DEPARTURE_"
+BASE_DAY_TYPES = ("workday", "weekend", "holiday")
 
 
 def _read_file(path: str | None) -> str | None:
@@ -71,14 +73,21 @@ class Settings:
             departure=_hhmm(e.get("EVJ_DEPARTURE") or None),
             reserve_pct=float(e.get("EVJ_RESERVE_PCT", "10")),
             preheat=e.get("EVJ_PREHEAT", "") in ("1", "true", "yes"),
-            timer_step_min=int(e.get("EVJ_TIMER_STEP_MIN", "15")),
+            timer_step_min=_positive(e.get("EVJ_TIMER_STEP_MIN", "15")),
             departures={
                 k[len(DEPARTURE_PREFIX) :].lower(): _hhmm(None if v.lower() == "none" else v)
                 for k, v in e.items()
                 if k.startswith(DEPARTURE_PREFIX) and len(k) > len(DEPARTURE_PREFIX)
             },
             day_ranges=_ranges(e.get("EVJ_DAY_TYPES", "")),
-        )
+        )._checked()
+
+    def _checked(self) -> "Settings":
+        known = set(BASE_DAY_TYPES) | {name for name, _a, _b in self.day_ranges}
+        unknown = set(self.departures) - known
+        if unknown:
+            raise ValueError(f"EVJ_DEPARTURE_<TYPE>: no such day type: {sorted(unknown)}")
+        return self
 
 
 def _hhmm(v: str | None) -> str | None:
@@ -97,7 +106,14 @@ def _ranges(v: str) -> tuple[tuple[str, date, date], ...]:
         name, _, span = item.strip().partition(":")
         first, _, last = span.partition("..")
         a, b = date.fromisoformat(first), date.fromisoformat(last)
-        if not name or a > b:
+        if not name or name.lower() in BASE_DAY_TYPES or a > b:
             raise ValueError(f"EVJ_DAY_TYPES: bad range {item!r}")
         out.append((name.lower(), a, b))
     return tuple(out)
+
+
+def _positive(v: str) -> int:
+    n = int(v)
+    if n <= 0:
+        raise ValueError(f"EVJ_TIMER_STEP_MIN must be above 0, not {v!r}")
+    return n

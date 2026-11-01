@@ -80,7 +80,8 @@ Left out for now:
   summed in real time, so the nights the clocks change are right.
 - **Departure**: `EVJ_DEPARTURE_<TYPE>` for the day type of the morning
   (`HH:MM`, or `none` for the zone end), else `EVJ_DEPARTURE`, else none.
-  Bad values stop the start-up, so they are found at once.
+  Bad values (a bad time, an unknown type, a range named like a built-in
+  type, a timer step of 0) stop the start-up, so they are found at once.
 - **Level**: the lowest of the car's three AC levels that reaches the target
   in time. Battery side 0.92 / 1.60 / 2.34 kW (low / mid / high; 1.22 /
   1.93 / 2.64 kW at the house meter, 661 sessions). The time is rounded up to
