@@ -38,6 +38,15 @@ class Influx:
                     rows.append({**tags, **dict(zip(s["columns"], v, strict=True))})
         return rows
 
+    def execute(self, statements: list[str], batch: int = 100) -> None:
+        """Run statements that change data (DELETE, DROP SERIES). Needs the write user."""
+        for i in range(0, len(statements), batch):
+            body = urllib.parse.urlencode({"q": "; ".join(statements[i : i + batch])}).encode()
+            data = json.loads(self._req("/query", {"db": self.db}, body))
+            for res in data.get("results", []):
+                if "error" in res:
+                    raise RuntimeError(res["error"])
+
     def write(self, lines: list[str], batch: int = 5000) -> None:
         for i in range(0, len(lines), batch):
             body = "\n".join(lines[i : i + batch]).encode()

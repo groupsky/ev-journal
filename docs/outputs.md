@@ -80,6 +80,28 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 Tag `journey` = the journey id. Fields `lat`, `lon`. The real fixes of the
 journey, thinned to one point per 50 m.
 
+### Stale rows
+
+After writing, a run deletes the rows that exist but were not produced this
+time. Example: two journeys merge, so the second one's row in `ev_journeys`,
+its `ev_trips` row if the trip changed, and its `ev_track` series must go.
+
+- The read user lists what exists: `SELECT` of one field per measurement,
+  and `SHOW TAG VALUES FROM ev_track WITH KEY = "journey"`.
+- The write user runs `DELETE FROM <m> WHERE time = <t>ms` and
+  `DROP SERIES FROM ev_track WHERE journey = '<id>'`.
+- Usually nothing is stale, so a run costs a few reads and no deletes.
+- A run that produced no trips deletes nothing, so an empty read never
+  wipes the history.
+- Not covered: a track point that disappears inside a journey that still
+  exists. Its series is kept, so the point stays.
+
+**Rights.** In InfluxDB 1.x, `DELETE` and `DROP SERIES` need only `WRITE` on
+the database, not admin. Checked on 2026-11-01: on the home server
+(InfluxDB 1.12.4) the write user has `WRITE` on `homy` and is not admin, and
+the read user has `READ`. CI runs the same steps against InfluxDB 1.12 with
+a `WRITE`-only and a `READ`-only user (`tests/test_cleanup.py`).
+
 ## MQTT
 
 Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
