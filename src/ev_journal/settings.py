@@ -25,6 +25,9 @@ class Settings:
     mqtt_url: str | None
     data_dir: Path
     api_token: str | None
+    places_file: Path | None
+    tz: str
+    interval_sec: int
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -39,4 +42,7 @@ class Settings:
             mqtt_url=e.get("EVJ_MQTT_URL"),
             data_dir=Path(e.get("EVJ_DATA_DIR", "/data")),
             api_token=_read_file(e.get("EVJ_API_TOKEN_FILE")),
+            places_file=Path(e["EVJ_PLACES_FILE"]) if e.get("EVJ_PLACES_FILE") else None,
+            tz=e.get("EVJ_TZ", "UTC"),
+            interval_sec=int(e.get("EVJ_INTERVAL_SEC", "900")),
         )

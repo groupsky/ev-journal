@@ -28,6 +28,18 @@ environment points to.
 | `EVJ_MQTT_URL` | MQTT broker, for example `mqtt://broker:1883` | — |
 | `EVJ_DATA_DIR` | folder for the SQLite store | `/data` |
 | `EVJ_API_TOKEN_FILE` | file with the API token | — |
+| `EVJ_PLACES_FILE` | places seed file ([format](docs/outputs.md#places-seed)) | — |
+| `EVJ_TZ` | time zone for months and workdays | `UTC` |
+| `EVJ_INTERVAL_SEC` | seconds between runs | `900` |
+
+## Run
+
+- `ev-journal` (or `ev-journal loop`): recompute and write every `EVJ_INTERVAL_SEC`.
+- `ev-journal run`: once.
+- `ev-journal dry-run`: read only. Prints counts per month and the GPS km vs
+  odometer gap. Writes nothing to InfluxDB or MQTT.
+
+Outputs and rules: [docs/outputs.md](docs/outputs.md).
 
 ## Develop
 
