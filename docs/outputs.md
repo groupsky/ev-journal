@@ -82,6 +82,9 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `kwh_per_pct`, `meter_ratio`, `overhead_kwh` | the battery model of the month's home charges ([home-charge.md](home-charge.md#drift)) |
 | `drift_flag` | why a value of the model moved against its 3-month median; empty when none did |
 
+A field that is empty this run (`null`) is not written, so an old value stays.
+`drift_flag` is always written, so an old flag is cleared.
+
 ### `ev_track` — track points for Grafana's Geomap
 
 Tag `journey` = the journey id. Fields `lat`, `lon`. The real fixes of the

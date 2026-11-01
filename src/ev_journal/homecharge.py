@@ -7,6 +7,7 @@ import statistics
 from dataclasses import dataclass
 
 MIN = 60_000
+RUNNING_MS = 5 * MIN  # the last charging minute is this recent: the charge runs
 ON_W = 150.0  # the meter shows charging above this power (as homy's ioniq-sessions)
 GAP_MS = 2 * MIN  # a pause up to this long stays inside one block
 PREHEAT_MAX_MS = 40 * MIN  # a later block this short is preheat, not charging
@@ -41,10 +42,12 @@ def blocks(minutes: list[tuple[int, float | None, float | None]]) -> list[Block]
         if w is not None and w > ON_W:
             if out and t - out[-1].end <= GAP_MS:
                 b = out[-1]
-                b.kwh, b.end, b.kw = b.kwh + e - b.total, t, w / 1000
+                # A meter reset (the total goes down) adds nothing.
+                b.kwh, b.end, b.kw = b.kwh + max(e - b.total, 0.0), t, w / 1000
             else:
+                # No row in the minute before: the first minute is lost (about 0.02 kWh).
                 base = prev_e if prev_e is not None else e
-                b = Block(start=t, end=t, kwh=e - base, kw=w / 1000)
+                b = Block(start=t, end=t, kwh=max(e - base, 0.0), kw=w / 1000)
                 out.append(b)
             b.total = e
         prev_e = e
@@ -53,8 +56,11 @@ def blocks(minutes: list[tuple[int, float | None, float | None]]) -> list[Block]
 
 def split(bs: list[Block]) -> tuple[float, float]:
     """(charging kWh, preheat kWh). A block after the first, 40 min or shorter, is preheat."""
-    pre = [b for b in bs[1:] if b.end - b.start + MIN <= PREHEAT_MAX_MS]
-    return sum(b.kwh for b in bs if b not in pre), sum(b.kwh for b in pre)
+    pre = [i > 0 and b.end - b.start + MIN <= PREHEAT_MAX_MS for i, b in enumerate(bs)]
+    return (
+        sum(b.kwh for b, p in zip(bs, pre, strict=True) if not p),
+        sum(b.kwh for b, p in zip(bs, pre, strict=True) if p),
+    )
 
 
 @dataclass
@@ -142,18 +148,20 @@ def drift(hc: list[HomeCharge], limit_pct: float, limit_kwh: float) -> dict[str,
     A value is flagged when it moves more than limit_pct (overhead: limit_kwh)
     against the median of the up to 3 months before it.
     """
-    ratio_all = fit(hc).ratio
+    all_ = fit(hc)
     by: dict[str, list[HomeCharge]] = {}
     for c in sorted(hc, key=lambda c: c.start):
         by.setdefault(c.month, []).append(c)
     out: dict[str, MonthModel] = {}
     for key in sorted(by):
         cs = by[key]
-        e = sum(c.meter_kwh for c in cs)
+        # The ratio after the overhead of all charges, so a month with more
+        # small charges does not look like a lower ratio.
+        e = sum(max(c.meter_kwh - all_.overhead, 0.0) for c in cs)
         out[key] = MonthModel(
             kwh_per_pct=kwh_per_pct(cs),
             meter_ratio=sum(c.battery_kwh for c in cs) / e if e > 0 else None,
-            overhead_kwh=statistics.median(c.meter_kwh - c.battery_kwh / ratio_all for c in cs),
+            overhead_kwh=statistics.median(c.meter_kwh - c.battery_kwh / all_.ratio for c in cs),
         )
     keys = sorted(out)
     for i, key in enumerate(keys):
@@ -181,11 +189,13 @@ def live(
     if not bs or soc_plugin is None:
         return None
     last = bs[-1]
-    running = now - last.end <= GAP_MS
+    # last.end is the start of a minute bucket, and the meter data comes a bit late.
+    running = now - last.end <= RUNNING_MS
     done = bs
     if running and len(bs) > 1 and last.end - last.start + MIN <= PREHEAT_MAX_MS:
         done = bs[:-1]  # may be preheat: left out until it is longer than 40 min
     meter, _pre = split(done)
+    kw = done[-1].kw
     soc = model.soc(soc_plugin, meter)
     need = model.meter_kwh_for(target - soc)
     return {
@@ -196,5 +206,5 @@ def live(
         "meter_kwh": meter,
         "target": target,
         "meter_kwh_to_target": need,
-        "min_to_target": need / last.kw * 60 if running and last.kw > 0 else None,
+        "min_to_target": need / kw * 60 if running and kw > 0 else None,
     }

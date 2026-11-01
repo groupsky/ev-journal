@@ -98,7 +98,9 @@ The issue's fit was meter kWh = 2.66 + 0.293 × ΔSoC.
 Per month, from the home charges that start in it:
 
 - `kwh_per_pct`: as above, over the month's charges of 20 % or more.
-- `meter_ratio`: battery kWh ÷ E, summed over the month.
+- `meter_ratio`: battery kWh ÷ (E − overhead), summed over the month, with
+  the overhead of all charges. Without the overhead, a month with more small
+  charges would show a lower ratio while the battery did not change.
 - `overhead_kwh`: the median of E − battery kWh ÷ ratio, with the ratio of
   all charges.
 
@@ -110,10 +112,13 @@ for it.
 
 | month | charges | kWh per % | ratio | overhead (kWh) | flag |
 |---|---|---|---|---|---|
-| 2026-07 | 10 | 0.303 | 0.810 | 1.18 | – |
-| 2026-08 | 21 | 0.304 | 0.831 | 0.87 | – |
-| 2026-09 | 23 | 0.304 | 0.815 | 1.15 | – |
-| 2026-10 | 28 | 0.309 | 0.788 | 1.29 | `meter_ratio -3.4 %` |
+| 2026-07 | 10 | 0.303 | 0.898 | 1.18 | – |
+| 2026-08 | 21 | 0.304 | 0.934 | 0.87 | `meter_ratio +4.0 %` |
+| 2026-09 | 23 | 0.304 | 0.902 | 1.15 | – |
+| 2026-10 | 28 | 0.309 | 0.881 | 1.29 | – |
 
-2026-10 was the coldest month (median 13.5 °C), so its flag looks seasonal.
-A year of data will tell.
+The ratio and the overhead of a month move together: 2026-08 has the lowest
+overhead and so the highest ratio. With only one month before it, its
+median is that one month. Battery kWh ÷ E without the overhead (0.810,
+0.831, 0.815, 0.788) flags 2026-10 instead (−3.4 %), the coldest month
+(median 13.5 °C). A year of data will tell which limit is right.

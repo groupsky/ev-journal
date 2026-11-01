@@ -33,6 +33,13 @@ def test_blocks_and_preheat():
     assert abs(preheat - 0.65) < 0.03
 
 
+def test_a_meter_reset_adds_nothing():
+    rows = minutes([(60, 1200)])
+    rows += [(t + 60 * MIN, w, e - 100) for t, w, e in minutes([(60, 1200)])]
+    (b,) = blocks(rows)
+    assert abs(b.kwh - 2.4) < 0.05
+
+
 def test_a_long_later_block_is_charging():
     bs = blocks(minutes([(60, 1220), (60, 0), (50, 1220)]))
     charging, preheat = split(bs)
@@ -76,7 +83,7 @@ def test_drift_flag_on_a_5_pct_move():
     assert d["2026-03"].drift_flag == ""
     assert d["2026-04"].drift_flag == "kwh_per_pct +5.0 %"
     assert abs(d["2026-04"].kwh_per_pct - 0.315) < 1e-9
-    assert abs(d["2026-04"].meter_ratio - 0.9 * 30 / 33) < 1e-9  # battery ÷ meter kWh
+    assert abs(d["2026-04"].meter_ratio - 0.9) < 1e-9  # after the overhead
     # A 2 % move stays under the limit.
     hc = month("2026-01", 0.30) + month("2026-02", 0.306)
     assert drift(hc, 3, 0.5)["2026-02"].drift_flag == ""
@@ -88,6 +95,7 @@ def test_live():
     now = bs[-1].end + MIN
     h = live(bs, 30.0, m, now, 80)
     assert h["running"]
+    assert live(bs, 30.0, m, now + 3 * MIN, 80)["running"]  # the meter data comes late
     assert abs(h["meter_kwh"] - 2.4) < 0.02
     assert abs(h["soc_now"] - (30 + 1.4 * 0.9 / 0.3)) < 0.1
     need = (80 - h["soc_now"]) * 0.3 / 0.9

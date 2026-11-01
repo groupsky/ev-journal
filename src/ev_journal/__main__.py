@@ -80,7 +80,8 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
         if b.end >= last.end
     ]
     soc = source.last_soc(db, bs[0].start) if bs else None
-    r.home_charge = homecharge.live(bs, soc, homecharge.fit(hc), now, s.soc_target)
+    real_now = int(time.time() * 1000)
+    r.home_charge = homecharge.live(bs, soc, homecharge.fit(hc), real_now, s.soc_target)
 
 
 def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
