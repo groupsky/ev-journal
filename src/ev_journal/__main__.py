@@ -6,9 +6,12 @@ run: read, recompute everything, write to InfluxDB and MQTT once.
 dry-run: read and recompute, print counts per month, write nothing.
 """
 
+import shutil
 import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ev_journal import charges, cleanup, outputs, places, source
@@ -41,16 +44,23 @@ def compute(s: Settings) -> Result:
     )
 
 
-def away(s: Settings, r: Result) -> str:
+def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
     """Update the station feed (daily) and the away charges in the store."""
-    db = places.open_store(s.data_dir)
+    data_dir = data_dir or s.data_dir
+    db = places.open_store(data_dir)
     try:
         now = int(time.time() * 1000)
-        status = charges.update_stations(db, s.data_dir / "fines-locations.geojson", now)
+        cache = data_dir / "fines-locations.geojson"
+        args = (fetch,) if fetch else ()
+        status = charges.update_stations(db, cache, now, *args)
         charges.sync(db, r, places.all_places(db), now)
         return status
     finally:
         db.close()
+
+
+def _no_fetch(url: str) -> bytes:
+    raise RuntimeError("dry-run: cache only")
 
 
 def run(s: Settings) -> Result:
@@ -124,9 +134,14 @@ def dry_run(s: Settings) -> None:
         labels[j.label] = labels.get(j.label, 0) + 1
     placed = sum(j.start_place is not None and j.end_place is not None for j in r.journeys)
     print(f"labels: {labels}; journeys with both places known: {placed}/{len(r.journeys)}")
-    # The store is local to this run (EVJ_DATA_DIR); nothing goes to InfluxDB or MQTT.
-    print(f"station feed: {away(s, r)}")
-    db = places.open_store(s.data_dir)
+    # Work on a copy of the store, from the feed cache only: nothing is written
+    # anywhere, and the Fines API is not called.
+    tmp = Path(tempfile.mkdtemp(prefix="evj-dry-"))
+    for name in ("ev-journal.sqlite", "fines-locations.geojson"):
+        if (s.data_dir / name).exists():
+            shutil.copy2(s.data_dir / name, tmp / name)
+    print(f"station feed: {away(s, r, tmp, _no_fetch)}")
+    db = places.open_store(tmp)
     rows = db.execute("SELECT id, match FROM charges WHERE at_home = 0 ORDER BY id").fetchall()
     first = next((cid for cid, how in rows if how in ("ok", "unsure")), None)
     since = [how for cid, how in rows if first is not None and cid >= first]
@@ -137,6 +152,7 @@ def dry_run(s: Settings) -> None:
         f" matched {share:.0f} %"
     )
     db.close()
+    shutil.rmtree(tmp)
 
 
 def main() -> None:

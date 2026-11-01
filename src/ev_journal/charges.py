@@ -24,6 +24,7 @@ MATCH_RADIUS_M = 75.0
 FIX_WINDOW_MS = 30 * 60_000  # the position at a charge: a fix this close in time
 QUESTION_AFTER_MS = 24 * 3_600_000
 QUESTION_LOOKBACK_MS = 14 * 86_400_000  # no questions for older charges
+RETRY_AFTER_MS = 3_600_000  # after a failed fetch, wait this long
 DEFAULT_LOSS = 1.10  # network kWh per battery kWh, until receipts teach better
 
 SCHEMA = """
@@ -98,10 +99,16 @@ def update_stations(
 
     Returns "cached", "fetched" or "failed: <reason>".
     """
-    if cache.exists() and now - cache.stat().st_mtime * 1000 < FEED_MAX_AGE_MS:
+    tried = cache.with_suffix(".tried")
+    fresh = cache.exists() and now - cache.stat().st_mtime * 1000 < FEED_MAX_AGE_MS
+    waiting = tried.exists() and now - tried.stat().st_mtime * 1000 < RETRY_AFTER_MS
+    if fresh or (waiting and cache.exists()):
         status = "cached"
         raw = cache.read_bytes()
+    elif waiting:
+        return "failed: waiting before the next try"
     else:
+        tried.touch()
         try:
             raw = fetch(FINES_URL)
             parse_fines(raw)  # check before we keep it
@@ -161,8 +168,18 @@ def match(pos: tuple[float, float] | None, stations: list[Station]) -> tuple[str
 
 
 def sync(db: sqlite3.Connection, r: Result, places: list[Place], now: int) -> None:
-    """Store every charge with its station, open the questions, and price them."""
+    """Store every charge with its station, open the questions, and price them.
+
+    Charges that are gone from homy are deleted, with their open questions.
+    Receipts and answers stay.
+    """
     stations = all_stations(db)
+    ids = [c.start for c in r.charges]
+    marks = ",".join("?" * len(ids)) or "NULL"
+    db.execute(f"DELETE FROM charges WHERE id NOT IN ({marks})", ids)
+    db.execute(
+        f"DELETE FROM questions WHERE answered_at IS NULL AND charge_id NOT IN ({marks})", ids
+    )
     for c in r.charges:
         pos = position(r.track, c.start, c.end) if r.track else None
         here = place_at(places, pos) or c.place
@@ -176,6 +193,15 @@ def sync(db: sqlite3.Connection, r: Result, places: list[Place], now: int) -> No
             " match = excluded.match",
             (c.start, c.end, c.kwh, c.type, int(at_home), sid, how),
         )
+    # A charge that is at home now (a place was added) is not priced here.
+    db.execute(
+        "UPDATE charges SET network_kwh = NULL, price_eur_per_kwh = NULL, price_source = NULL,"
+        " cost_eur = NULL WHERE at_home = 1"
+    )
+    db.execute(
+        "DELETE FROM questions WHERE answered_at IS NULL"
+        " AND charge_id IN (SELECT id FROM charges WHERE at_home = 1)"
+    )
     open_questions(db, now)
     for (cid,) in db.execute("SELECT id FROM charges WHERE at_home = 0").fetchall():
         price(db, cid)
@@ -185,9 +211,8 @@ def sync(db: sqlite3.Connection, r: Result, places: list[Place], now: int) -> No
 def open_questions(db: sqlite3.Connection, now: int) -> None:
     """A question for each recent away charge with no receipt, 24 h after it ends."""
     db.execute(
-        "INSERT OR IGNORE INTO questions (charge_id, opened_at, station_name, battery_kwh)"
-        " SELECT c.id, ?, s.name, c.battery_kwh FROM charges c"
-        " LEFT JOIN stations s ON s.id = c.station_id"
+        "INSERT OR IGNORE INTO questions (charge_id, opened_at, battery_kwh)"
+        " SELECT c.id, ?, c.battery_kwh FROM charges c"
         " WHERE c.at_home = 0 AND c.end_ts <= ? AND c.end_ts >= ?"
         " AND c.id NOT IN (SELECT charge_id FROM receipts)",
         (now, now - QUESTION_AFTER_MS, now - QUESTION_LOOKBACK_MS),
@@ -198,7 +223,7 @@ def open_questions(db: sqlite3.Connection, now: int) -> None:
 
 
 def parse_answer(text: str) -> tuple[float, float]:
-    """ "4.43 11.364" -> (amount in EUR, network kWh). A comma works as the decimal mark."""
+    """ "5.00 12.5" -> (amount in EUR, network kWh). A comma works as the decimal mark."""
     nums = re.findall(r"\d+(?:[.,]\d+)?", text)
     if len(nums) != 2:
         raise ValueError("expected two numbers: the amount and the network kWh")
@@ -210,11 +235,12 @@ def parse_answer(text: str) -> tuple[float, float]:
 
 def loss_ratio(db: sqlite3.Connection) -> float:
     """Network kWh per battery kWh: the median of the known charges, or the default."""
+    # One value per charge; a receipt wins over an answer.
     rows = db.execute(
-        "SELECT x.network_kwh / c.battery_kwh FROM charges c JOIN ("
-        " SELECT charge_id, network_kwh FROM receipts UNION ALL"
-        " SELECT charge_id, network_kwh FROM questions WHERE answered_at IS NOT NULL"
-        ") x ON x.charge_id = c.id WHERE c.battery_kwh > 0"
+        "SELECT COALESCE(r.network_kwh, q.network_kwh) / c.battery_kwh FROM charges c"
+        " LEFT JOIN receipts r ON r.charge_id = c.id"
+        " LEFT JOIN questions q ON q.charge_id = c.id AND q.answered_at IS NOT NULL"
+        " WHERE c.battery_kwh > 0 AND COALESCE(r.network_kwh, q.network_kwh) IS NOT NULL"
     ).fetchall()
     return statistics.median(r[0] for r in rows) if rows else DEFAULT_LOSS
 

@@ -160,7 +160,7 @@ class Question(BaseModel):
 
 
 class AnswerIn(BaseModel):
-    text: str = Field(description='The amount in EUR and the network kWh, e.g. "4.43 11.364".')
+    text: str = Field(description='The amount in EUR and the network kWh, e.g. "5.00 12.5".')
 
 
 def _place(r: sqlite3.Row) -> Place:
@@ -499,9 +499,12 @@ def create_app(
     def list_questions(conn=Depends(db)):
         """Open questions: away charges with no receipt and no answer."""
         rows = conn.execute(
-            "SELECT charge_id, station_name, battery_kwh, opened_at FROM questions"
-            " WHERE answered_at IS NULL AND charge_id NOT IN (SELECT charge_id FROM receipts)"
-            " ORDER BY charge_id"
+            "SELECT q.charge_id, s.name, q.battery_kwh, q.opened_at FROM questions q"
+            " JOIN charges c ON c.id = q.charge_id AND c.at_home = 0"
+            " LEFT JOIN stations s ON s.id = c.station_id"
+            " WHERE q.answered_at IS NULL"
+            " AND q.charge_id NOT IN (SELECT charge_id FROM receipts)"
+            " ORDER BY q.charge_id"
         )
         return [
             Question(

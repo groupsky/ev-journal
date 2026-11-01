@@ -37,8 +37,10 @@ environment points to.
 
 - `ev-journal` (or `ev-journal loop`): recompute and write every `EVJ_INTERVAL_SEC`.
 - `ev-journal run`: once.
-- `ev-journal dry-run`: read only. Prints counts per month and the GPS km vs
-  odometer gap. Writes nothing to InfluxDB or MQTT.
+- `ev-journal dry-run`: read only. Prints counts per month, the GPS km vs
+  odometer gap and the station match counts. Writes nothing to InfluxDB or
+  MQTT, works on a temporary copy of the store, and uses only the cached
+  station feed.
 
 Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/api.md).
 Away charges and their price: [docs/charges.md](docs/charges.md).

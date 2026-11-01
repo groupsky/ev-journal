@@ -4,7 +4,7 @@
       "AnswerIn": {
         "properties": {
           "text": {
-            "description": "The amount in EUR and the network kWh, e.g. \"4.43 11.364\".",
+            "description": "The amount in EUR and the network kWh, e.g. \"5.00 12.5\".",
             "title": "Text",
             "type": "string"
           }
