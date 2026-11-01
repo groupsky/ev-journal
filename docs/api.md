@@ -26,11 +26,17 @@ request gets `401`.
 | `GET` | `/places/suggestions` | frequent stops with no place |
 
 Routes (`/routes`, `/routes/{id}`) work the same. A route is a name and an
-ordered list of existing place ids.
+ordered list of existing place ids. A place that a route uses cannot be
+deleted (`409`); change or delete the route first.
 
-**Sync.** `GET …?changed_since=T` returns the rows changed at or after `T`
-(ms), deleted ones as `deleted` markers, and `now`. Use `now` as the next `T`.
-A row may come twice; that is harmless.
+**Errors** are always `{"detail": "<text>"}`: `401` no or wrong token, `404`
+not found, `409` conflict, `422` a bad request.
+
+**Sync.** Every write moves a row to the end of a sequence. A list returns
+`cursor`. `GET …?changed_since=<cursor>` returns the rows written after it,
+with deleted ones as `deleted` markers, and the next `cursor`. Start with a
+plain `GET` (all rows) or `changed_since=0`. The cursor is a counter, not a
+time, so a clock change or two writes in the same ms lose nothing.
 
 **Versions.** Every write returns the new `version`. Send the version you saw
 in the body (`PUT`) or as `?version=` (`DELETE`). There is one user, so the
@@ -53,7 +59,8 @@ recompute, so they are empty until the first run is done.
 `PUT /journeys/{id}/label` with `{"label": "commute" | "other" | null,
 "not_me": bool}`. The id is a time in ms, usually the journey's start; the
 label attaches to the journey that contains that time, so it survives every
-recompute. `null` means "use the computed label". `ev_journeys` then has
+recompute. A time in no journey of the last recompute gets `404` (also before
+the first recompute is done). `null` means "use the computed label". `ev_journeys` then has
 `label_by_hand` and `not_me`.
 
 ## Command log

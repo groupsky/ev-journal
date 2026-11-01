@@ -37,8 +37,6 @@ def _operation(method: str, path: str) -> tuple[str, dict]:
 
 
 class CheckedClient(TestClient):
-    checked = 0
-
     def request(self, method, url, *args, **kwargs):
         resp = super().request(method, url, *args, **kwargs)
         path = resp.request.url.path
@@ -63,7 +61,6 @@ class CheckedClient(TestClient):
             Draft202012Validator({"$ref": "urn:openapi" + pointer}, registry=REGISTRY).validate(
                 resp.json()
             )
-        CheckedClient.checked += 1
         return resp
 
 
@@ -79,8 +76,15 @@ def stops():
 
 
 @pytest.fixture
-def client(data_dir, stops):
-    app = create_app(places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), lambda: stops)
+def journeys():
+    return []
+
+
+@pytest.fixture
+def client(data_dir, stops, journeys):
+    app = create_app(
+        places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), lambda: stops, lambda: journeys
+    )
     c = CheckedClient(app)
     c.headers["Authorization"] = f"Bearer {TOKEN}"
     return c

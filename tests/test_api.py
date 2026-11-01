@@ -54,13 +54,13 @@ def test_stale_version_last_write_wins(client):
 def test_changed_since_with_deleted_rows(client):
     a = client.post("/places", json=LAKE).json()["id"]
     b = client.post("/places", json={**LAKE, "name": "Test B"}).json()["id"]
-    since = client.get("/places").json()["now"]
+    since = client.get("/places").json()["cursor"]
     client.put(f"/places/{a}", json={**LAKE, "name": "Test A2"})
     client.delete(f"/places/{b}")
     got = client.get("/places", params={"changed_since": since}).json()
     assert [p["id"] for p in got["items"]] == [a]
     assert [d["id"] for d in got["deleted"]] == [b]
-    later = client.get("/places", params={"changed_since": got["now"] + 1}).json()
+    later = client.get("/places", params={"changed_since": got["cursor"]}).json()
     assert later["items"] == [] and later["deleted"] == []
 
 
@@ -70,7 +70,7 @@ def test_routes(client):
     assert client.post("/routes", json={"name": "r", "place_ids": [a, "nope"]}).status_code == 422
     w = client.post("/routes", json={"name": "Test Route", "place_ids": [a, b]}).json()
     rid = w["id"]
-    since = client.get("/routes").json()["now"]
+    since = client.get("/routes").json()["cursor"]
     w = client.put(f"/routes/{rid}", json={"name": "Back", "place_ids": [b, a], "version": 1})
     assert w.json()["version"] == 2
     assert client.get(f"/routes/{rid}").json()["place_ids"] == [b, a]
@@ -83,10 +83,12 @@ def test_routes(client):
     assert got["items"] == [] and [d["id"] for d in got["deleted"]] == [rid]
 
 
-def test_label_and_not_me_survive_a_recompute(client, data_dir):
+def test_label_and_not_me_survive_a_recompute(client, data_dir, journeys):
     # Tue's journey starts at 09:00. A label set at 09:30 attaches to it.
     w = week()
+    journeys += [(j.start, j.end) for j in build(w.trips, w.charges, w.fixes, PLACES, UTC).journeys]
     tue = ms(6, 9)
+    assert client.put(f"/journeys/{ms(6, 3)}/label", json={"label": "other"}).status_code == 404
     r = client.put(
         f"/journeys/{tue + 30 * 60_000}/label", json={"label": "commute", "not_me": True}
     )
@@ -133,12 +135,6 @@ def test_repeated_command_post_is_ignored(client, data_dir):
     assert db.execute("SELECT count(*) FROM commands").fetchone()[0] == 1
 
 
-def test_every_response_was_checked():
-    # The contract check runs inside CheckedClient.request for every call above.
-    assert CheckedClient.checked > 30
-    assert TOKEN
-
-
 def test_seed_is_a_first_import_only(tmp_path):
     seed = tmp_path / "seed.json"
     seed.write_text(
@@ -162,5 +158,29 @@ def test_store_from_issue_3_is_upgraded(tmp_path):
     old.close()
     db = places.open_store(tmp_path)
     assert [p.id for p in places.all_places(db)] == ["p1"]
-    row = db.execute("SELECT version, deleted, aliases FROM places").fetchone()
-    assert tuple(row) == (1, 0, "[]")
+    row = db.execute("SELECT version, deleted, aliases, seq FROM places").fetchone()
+    assert tuple(row) == (1, 0, "[]", 1)
+
+
+def test_errors_have_one_shape(client):
+    a = client.post("/places", json=LAKE).json()["id"]
+    rid = client.post("/routes", json={"name": "r", "place_ids": [a]}).json()["id"]
+    for resp in (
+        client.post("/routes", json={"name": "", "place_ids": [a]}),
+        client.put(f"/routes/{rid}", json={"name": "r", "place_ids": ["nope"]}),
+        client.post("/places", json={"name": "x"}),
+        client.get("/places", params={"changed_since": "soon"}),
+    ):
+        assert resp.status_code == 422 and isinstance(resp.json()["detail"], str)
+
+
+def test_a_place_in_a_route_cannot_be_deleted(client):
+    a = client.post("/places", json=LAKE).json()["id"]
+    rid = client.post("/routes", json={"name": "r", "place_ids": [a]}).json()["id"]
+    assert client.delete(f"/places/{a}").status_code == 409
+    client.delete(f"/routes/{rid}")
+    assert client.delete(f"/places/{a}").status_code == 200
+
+
+def test_bearer_scheme_ignores_case(client):
+    assert client.get("/places", headers={"Authorization": f"bearer {TOKEN}"}).status_code == 200

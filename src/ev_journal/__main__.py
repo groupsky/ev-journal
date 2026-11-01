@@ -70,10 +70,22 @@ def serve_api(s: Settings, state: dict) -> None:
 
     places.open_store(s.data_dir).close()  # create or upgrade the tables
     app = create_app(
-        places.store_path(s.data_dir), s.api_token, ZoneInfo(s.tz), lambda: state["stops"]
+        places.store_path(s.data_dir),
+        s.api_token,
+        ZoneInfo(s.tz),
+        lambda: state["stops"],
+        lambda: state["journeys"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
-    threading.Thread(target=server.run, daemon=True).start()
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            return
+        if not thread.is_alive():
+            break
+        time.sleep(0.1)
+    sys.exit(f"ev-journal: the API did not start on {s.api_host}:{s.api_port}")
 
 
 def dry_run(s: Settings) -> None:
@@ -106,12 +118,14 @@ def main() -> None:
     elif cmd == "run":
         run(s)
     elif cmd == "loop":
-        state = {"stops": []}
+        state = {"stops": [], "journeys": []}
         if s.api_token:
             serve_api(s, state)
         while True:
             try:
-                state["stops"] = journey_ends(run(s))
+                r = run(s)
+                state["stops"] = journey_ends(r)
+                state["journeys"] = [(j.start, j.end) for j in r.journeys]
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
             time.sleep(s.interval_sec)
