@@ -19,6 +19,10 @@ so far; only the evening one matters.
   [holidays](https://pypi.org/project/holidays/) package) or a date in
   `EVJ_DAYS_OFF`, on Monday to Friday.
 - `workday`: the rest.
+- Extra types: `EVJ_DAY_TYPES` names date ranges, for example
+  `alt:2026-01-05..2026-01-09`. A workday inside a range gets that name.
+  Weekends and holidays keep theirs. An extra type only changes the
+  departure; for the forecast it is a workday.
 
 Workdays form one pool. Weekends and holidays form the other ("off" days):
 there are too few holidays to learn from alone.
@@ -73,12 +77,16 @@ Left out for now:
   23:00–07:00 from 1 April to 31 October, by the date of the evening.
 - **The charge ends** at the end of the zone, or at the departure when that
   falls inside the zone. The charge starts no earlier than now. Times are
-  summed in real time, so the nights the clocks change are right. The departure (`EVJ_DEPARTURE`, `HH:MM`) is used on
-  workdays only.
+  summed in real time, so the nights the clocks change are right.
+- **Departure**: `EVJ_DEPARTURE_<TYPE>` for the day type of the morning
+  (`HH:MM`, or `none` for the zone end), else `EVJ_DEPARTURE`, else none.
+  Bad values (a bad time, an unknown type, a range named like a built-in
+  type, a timer step of 0) stop the start-up, so they are found at once.
 - **Level**: the lowest of the car's three AC levels that reaches the target
   in time. Battery side 0.92 / 1.60 / 2.34 kW (low / mid / high; 1.22 /
   1.93 / 2.64 kW at the house meter, 661 sessions). The time is rounded up to
-  15 min. The start is the end less that time.
+  the step of the car's charge timer (`EVJ_TIMER_STEP_MIN`, 15 min). The
+  start is the end less that time.
 - When even the high level cannot reach the target inside the zone, the
   advice is high for the whole zone, and the target is what that reaches
   (`capped`).

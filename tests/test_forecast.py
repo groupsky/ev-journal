@@ -190,3 +190,28 @@ def test_after_midnight_the_start_is_not_in_the_past():
     now = at(date(2026, 1, 13), 3)
     a = advise(20, 6.0, KPP, WINTER, None, 10, now)  # 3.5 h at low does not fit in 3 h
     assert a.level == "mid" and a.start >= now
+
+
+def test_timer_step():
+    # 3.26 h at low: 3 h 20 min in 10 min steps, 3 h 30 min in 15 min steps.
+    a = advise(20, 6.0, KPP, WINTER, None, 10, step_min=10)
+    assert a.start == a.end - timedelta(hours=3, minutes=20)
+
+
+def test_departure_per_day_type():
+    r = result(28, 5.0)
+    evening = at(date(2026, 2, 2), 20)  # before Tuesday 2026-02-03
+    now = int(evening.timestamp() * 1000)
+    ranges = (("alt", date(2026, 2, 1), date(2026, 2, 10)),)
+    deps = {"alt": "05:30", "weekend": None}
+    a = plan(r, UTC, now, 5.0, KPP, set(), "05:00", departures=deps, ranges=ranges)
+    assert a["day_type"] == "alt"
+    assert a["end"] == a["departure"] == at(date(2026, 2, 3), 5, 30).isoformat()
+    # Outside the range: the default departure.
+    a = plan(r, UTC, now, 5.0, KPP, set(), "05:00", departures=deps)
+    assert a["day_type"] == "workday" and a["end"] == at(date(2026, 2, 3), 5).isoformat()
+    # A weekend inside the range stays a weekend; "none" ends at the zone end.
+    sat = int(at(date(2026, 2, 6), 20).timestamp() * 1000)
+    a = plan(r, UTC, sat, 5.0, KPP, set(), "05:00", departures=deps, ranges=ranges)
+    assert a["day_type"] == "weekend" and a["departure"] is None
+    assert a["end"] == at(date(2026, 2, 7), 6).isoformat()

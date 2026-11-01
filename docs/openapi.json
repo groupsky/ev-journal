@@ -17,13 +17,19 @@
             "type": "string"
           },
           "day_type": {
-            "enum": [
-              "workday",
-              "weekend",
-              "holiday"
-            ],
             "title": "Day Type",
             "type": "string"
+          },
+          "departure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Departure"
           },
           "end": {
             "anyOf": [
@@ -101,6 +107,7 @@
           "level",
           "start",
           "end",
+          "departure",
           "capped",
           "preheat_off",
           "message",

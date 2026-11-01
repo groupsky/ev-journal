@@ -1,3 +1,7 @@
+from datetime import date
+
+import pytest
+
 from ev_journal.settings import Settings
 
 
@@ -25,3 +29,35 @@ def test_passwords_come_from_files(tmp_path):
     assert s.influx_read_password == "secret"
     assert s.api_token == "t0ken"
     assert s.data_dir == tmp_path
+
+
+def test_departures_and_day_types():
+    s = Settings.from_env(
+        {
+            "EVJ_DEPARTURE": "05:00",
+            "EVJ_DEPARTURE_ALT": "05:40",
+            "EVJ_DEPARTURE_WEEKEND": "none",
+            "EVJ_DAY_TYPES": "alt:2026-01-05..2026-01-09, alt:2026-02-02..2026-02-06",
+            "EVJ_TIMER_STEP_MIN": "10",
+        }
+    )
+    assert s.departure == "05:00"
+    assert s.departures == {"alt": "05:40", "weekend": None}
+    assert s.day_ranges == (
+        ("alt", date(2026, 1, 5), date(2026, 1, 9)),
+        ("alt", date(2026, 2, 2), date(2026, 2, 6)),
+    )
+    assert s.timer_step_min == 10
+    assert Settings.from_env({}).timer_step_min == 15
+    with pytest.raises(ValueError):
+        Settings.from_env({"EVJ_DAY_TYPES": "alt:2026-01-09..2026-01-05"})
+    bad = [
+        {"EVJ_DEPARTURE_ALT": "soon"},
+        {"EVJ_DEPARTURE_TYPO": "05:00"},  # no such day type
+        {"EVJ_DAY_TYPES": "weekend:2026-01-05..2026-01-09"},  # a built-in name
+        {"EVJ_DAY_TYPES": ":2026-01-05..2026-01-09"},
+        {"EVJ_TIMER_STEP_MIN": "0"},
+    ]
+    for env in bad:
+        with pytest.raises(ValueError):
+            Settings.from_env(env)
