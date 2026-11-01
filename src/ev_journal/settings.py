@@ -33,6 +33,11 @@ class Settings:
     soc_target: float = 80.0
     drift_pct: float = 3.0
     drift_kwh: float = 0.5
+    holidays_country: str | None = None
+    days_off: tuple[str, ...] = ()
+    departure: str | None = None
+    reserve_pct: float = 10.0
+    preheat: bool = False
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -55,4 +60,9 @@ class Settings:
             soc_target=float(e.get("EVJ_SOC_TARGET", "80")),
             drift_pct=float(e.get("EVJ_DRIFT_PCT", "3")),
             drift_kwh=float(e.get("EVJ_DRIFT_KWH", "0.5")),
+            holidays_country=e.get("EVJ_HOLIDAYS") or None,
+            days_off=tuple(d.strip() for d in e.get("EVJ_DAYS_OFF", "").split(",") if d.strip()),
+            departure=e.get("EVJ_DEPARTURE") or None,
+            reserve_pct=float(e.get("EVJ_RESERVE_PCT", "10")),
+            preheat=e.get("EVJ_PREHEAT", "") in ("1", "true", "yes"),
         )

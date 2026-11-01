@@ -36,6 +36,30 @@ class Error(BaseModel):
     detail: str
 
 
+class Score(BaseModel):
+    days: int
+    covered_pct: float
+    normal_error_kwh: float
+
+
+class Advice(BaseModel):
+    """Tomorrow's energy need and how to charge for it (docs/forecast.md)."""
+
+    day: str
+    day_type: Literal["workday", "weekend", "holiday"]
+    normal_kwh: float
+    bad_kwh: float
+    soc_now: float
+    target: float
+    level: Literal["low", "mid", "high"] | None
+    start: str | None
+    end: str | None
+    capped: bool
+    preheat_off: bool
+    message: str
+    score: dict[str, Score]
+
+
 class PlaceIn(BaseModel):
     name: str = Field(min_length=1)
     aliases: list[str] = []
@@ -245,9 +269,10 @@ def create_app(
     tz: ZoneInfo,
     stops: Callable[[], list[tuple[int, float, float]]] = list,
     journeys: Callable[[], list[tuple[int, int]]] = list,
+    advice: Callable[[], dict | None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
-    journeys the (start, end) of each journey."""
+    journeys the (start, end) of each journey, advice the last advice."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -535,6 +560,13 @@ def create_app(
             )
             charges.price(conn, question_id)
         return charge_price(conn, question_id)
+
+    @r.get("/advice", response_model=Advice, responses=nf)
+    def get_advice():
+        a = advice()
+        if a is None:
+            raise Fail(404, "no advice yet")
+        return a
 
     app.include_router(r)
     return app

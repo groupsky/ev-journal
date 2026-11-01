@@ -35,13 +35,18 @@ environment points to.
 | `EVJ_SOC_TARGET` | SoC % a home charge aims for, in the live estimate | `80` |
 | `EVJ_DRIFT_PCT` | drift limit for kWh per % and the meter ratio | `3` |
 | `EVJ_DRIFT_KWH` | drift limit for the overhead per home charge | `0.5` |
+| `EVJ_HOLIDAYS` | country code for official holidays ([forecast](docs/forecast.md)) | — |
+| `EVJ_DAYS_OFF` | extra days off, `YYYY-MM-DD,…` | — |
+| `EVJ_DEPARTURE` | workday departure, `HH:MM`; the charge ends by then | — |
+| `EVJ_RESERVE_PCT` | SoC % added to the bad-day need | `10` |
+| `EVJ_PREHEAT` | `1` when a weekday preheat is set in the car | — |
 
 ## Run
 
 - `ev-journal` (or `ev-journal loop`): recompute and write every `EVJ_INTERVAL_SEC`.
 - `ev-journal run`: once.
 - `ev-journal dry-run`: read only. Prints counts per month, the GPS km vs
-  odometer gap, the station match counts and the home charge back-test.
+  odometer gap, the station match counts and the back-tests.
   Writes nothing to InfluxDB or MQTT, works on a temporary copy of the
   store, and uses only the cached station feed.
 
@@ -49,6 +54,7 @@ Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/a
 Away charges and their price: [docs/charges.md](docs/charges.md). Price of
 trips and months: [docs/price.md](docs/price.md). SoC during a home charge
 and battery model drift: [docs/home-charge.md](docs/home-charge.md).
+Forecast and charging advice: [docs/forecast.md](docs/forecast.md).
 
 ## Develop
 

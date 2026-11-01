@@ -81,9 +81,19 @@ def journeys():
 
 
 @pytest.fixture
-def client(data_dir, stops, journeys):
+def advice():
+    return {"value": None}
+
+
+@pytest.fixture
+def client(data_dir, stops, journeys, advice):
     app = create_app(
-        places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), lambda: stops, lambda: journeys
+        places.store_path(data_dir),
+        TOKEN,
+        ZoneInfo("UTC"),
+        lambda: stops,
+        lambda: journeys,
+        lambda: advice["value"],
     )
     c = CheckedClient(app)
     c.headers["Authorization"] = f"Bearer {TOKEN}"
