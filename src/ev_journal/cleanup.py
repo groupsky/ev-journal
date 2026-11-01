@@ -28,6 +28,8 @@ def produced(r: Result) -> dict[str, set[int]]:
 
 
 def stale_statements(reader: Influx, r: Result) -> list[str]:
+    # A SELECT without a time bound sees rows up to now. We never write rows
+    # in the future, so that is all of them.
     out = []
     for m, keep in produced(r).items():
         rows = reader.query(f'SELECT "{KEY_FIELD[m]}" FROM "{m}"')
@@ -35,7 +37,8 @@ def stale_statements(reader: Influx, r: Result) -> list[str]:
             out.append(f'DELETE FROM "{m}" WHERE time = {t}ms')
     keep_tracks = {str(j.id) for j in r.journeys}
     rows = reader.query('SHOW TAG VALUES FROM "ev_track" WITH KEY = "journey"')
-    for v in sorted({row["value"] for row in rows} - keep_tracks):
+    # Journey ids are ms numbers; anything else is not ours to quote into a query.
+    for v in sorted({row["value"] for row in rows if row["value"].isdigit()} - keep_tracks):
         out.append(f'DROP SERIES FROM "ev_track" WHERE "journey" = \'{v}\'')
     return out
 

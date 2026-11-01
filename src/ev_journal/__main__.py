@@ -42,12 +42,12 @@ def run(s: Settings) -> None:
     db = Influx(s.influx_url, s.influx_db, s.influx_write_user, s.influx_write_password)
     lines = outputs.influx_lines(r)
     db.write(lines)
-    reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
-    deleted = cleanup.cleanup(reader, db, r)
     if s.mqtt_url:
         from ev_journal import mqtt
 
         mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
+    reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    deleted = cleanup.cleanup(reader, db, r)
     print(
         f"ev-journal: {len(r.trips)} trips, {len(r.journeys)} journeys, {len(lines)} rows, "
         f"{deleted} stale deleted"

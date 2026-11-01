@@ -15,7 +15,10 @@ UTC = ZoneInfo("UTC")
 
 
 class FakeInflux:
-    """Just enough of InfluxDB 1.x for the cleanup: rows keyed by series and time."""
+    """Just enough of InfluxDB 1.x for the cleanup: rows keyed by series and time.
+
+    It ignores precision and fields. test_against_real_influxdb covers those.
+    """
 
     def __init__(self):
         self.rows: dict[str, dict[tuple[str, int], str]] = {}
@@ -111,10 +114,15 @@ def test_against_real_influxdb():
     first, second, stale_id = two_results()
     writer.write(outputs.influx_lines(first))
     cleanup.cleanup(reader, writer, first)
+    # Plant a stale month and a stale outing, as if from an older run.
+    old = second.months[0].start - 31 * 86_400_000
+    writer.write([f"ev_month km=1.0 {old}", f"ev_outings end_ts=1.0 {old}"])
     writer.write(outputs.influx_lines(second))
     assert cleanup.cleanup(reader, writer, second) > 0
-    times = {int(r["time"]) for r in reader.query('SELECT "end_ts" FROM "ev_journeys"')}
-    assert times == {j.id for j in second.journeys}
+    for m, keep in cleanup.produced(second).items():
+        field = cleanup.KEY_FIELD[m]
+        times = {int(r["time"]) for r in reader.query(f'SELECT "{field}" FROM "{m}"')}
+        assert times == keep, m
     tracks = {
         r["value"] for r in reader.query('SHOW TAG VALUES FROM "ev_track" WITH KEY = "journey"')
     }

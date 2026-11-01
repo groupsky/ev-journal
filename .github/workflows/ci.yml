@@ -14,7 +14,7 @@ jobs:
     services:
       influxdb:
         # The same major version as on the home server, with a WRITE-only and a READ-only user.
-        image: influxdb:1.12
+        image: influxdb:1.12.4
         ports: ["8086:8086"]
         env:
           INFLUXDB_HTTP_AUTH_ENABLED: "true"
@@ -39,7 +39,12 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: |
-          for i in $(seq 30); do curl -sf http://localhost:8086/ping && break; sleep 1; done
+          # Wait for the real server (with auth), not the setup one.
+          for i in $(seq 60); do
+            curl -sf -u r:r 'http://localhost:8086/query?q=SHOW+DATABASES' && exit 0
+            sleep 1
+          done
+          exit 1
       - run: pytest -v -rs
 
   image:
