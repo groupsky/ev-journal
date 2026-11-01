@@ -16,8 +16,9 @@ TEST_AREA_DEG = 1.0
 ESCAPE = "privacy: ok"
 
 NUM = r"[-+]?\d{1,3}(?:\.\d+)?"
-# Two numbers with 2+ decimals, split by a comma or a semicolon.
-PAIR = re.compile(r"(?<![\w.])([-+]?\d{1,3}\.\d{2,})\s*[,;]\s*([-+]?\d{1,3}\.\d{2,})(?![\w.])")
+# Two numbers with 3+ decimals, split by a comma or a semicolon.
+# (3, so that version lists like 3.12, 3.13 pass.)
+PAIR = re.compile(r"(?<![\w.])([-+]?\d{1,3}\.\d{3,})\s*[,;]\s*([-+]?\d{1,3}\.\d{3,})(?![\w.])")
 # A number after a lat/lon key, also as home_lat or startLng.
 KEYED = re.compile(
     r"(?:\b|_|(?<=[a-z])(?=[A-Z]))(?i:lat|latitude|lon|lng|longitude)\b"
@@ -63,8 +64,8 @@ def test_detector_catches_points_outside_the_area():
     caught = [
         "at = (10.5000, -30.2500)",  # privacy: ok
         '{"lat": 0.0, "lon": -20.0}',  # privacy: ok
-        "[-140.25, 10.75]",  # privacy: ok
-        "5.50,-20.50",  # privacy: ok
+        "[-140.255, 10.755]",  # privacy: ok
+        "5.505,-20.505",  # privacy: ok
         '{"lat":10,"lon":-30}',  # privacy: ok
         "home_lat = 10.5",  # privacy: ok
         "startLng: -30.25",  # privacy: ok
@@ -77,6 +78,7 @@ def test_detector_catches_points_outside_the_area():
         "[-0.5, 0.25]",
         "python 3.12, ruff 0.6",
         "3.14159 2.71828",
+        "python: [3.12, 3.13]",
         "latency = 30",
         "semicolon: 42",
         "xlon = 30",
