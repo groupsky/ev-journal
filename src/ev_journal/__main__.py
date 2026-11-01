@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import charges, cleanup, outputs, places, source
+from ev_journal import charges, cleanup, outputs, places, price, source
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build
 from ev_journal.settings import Settings
@@ -26,22 +26,26 @@ def compute(s: Settings) -> Result:
         places.load_seed(store, s.places_file)
     pl = places.all_places(store)
     labels = places.all_labels(store)
+    away_costs = charges.known_costs(store)
     store.close()
     db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
-    trips, charges = source.trips(db), source.charges(db)
+    trips, sessions = source.trips(db), source.charges(db)
     if not trips:
         return build([], [], [], pl, ZoneInfo(s.tz), labels=labels)
     start = min(t.start for t in trips) - 86_400_000
     end = int(time.time() * 1000) + 60_000
-    return build(
+    r = build(
         trips,
-        charges,
+        sessions,
         source.fixes(db, start, end),
         pl,
         ZoneInfo(s.tz),
         odometer=source.odometer(db, start, end),
         labels=labels,
     )
+    home = source.home_costs(db)
+    price.apply(r, {**away_costs, **home}, set(home), ZoneInfo(s.tz))
+    return r
 
 
 def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
@@ -114,6 +118,10 @@ def serve_api(s: Settings, state: dict) -> None:
     sys.exit(f"ev-journal: the API did not start on {s.api_host}:{s.api_port}")
 
 
+def by_key(t: int, r: Result) -> str:
+    return next(m.key for m in reversed(r.months) if m.start <= t)
+
+
 def dry_run(s: Settings) -> None:
     r = compute(s)
     print("month    trips journeys outings  gps_km  odo_km   gap%  gps_trips")
@@ -128,6 +136,24 @@ def dry_run(s: Settings) -> None:
         print(
             f"{m.key}  {m.trips:5d} {m.journeys:8d} {m.outings:7d} {m.km:7.0f} {odo} {gap}"
             f"  {gps}/{m.trips}"
+        )
+    # Money stays out of this print: only shares and percentages.
+    print("month   priced trips  kWh/100km  home vs other charges  driving cost vs home price")
+    for m in r.months:
+        mc = [c for c in r.charges if by_key(c.start, r) == m.key]
+        tr = [t for t in r.trips if by_key(t.start, r) == m.key]
+        home = [c for c in mc if c.home_cost and c.kwh]
+        others = len(mc) - len(home)
+        check = "-"
+        if home and m.priced_kwh:
+            avg = sum(c.cost_eur for c in home) / sum(c.kwh for c in home)
+            gap = (m.driving_cost_eur - m.priced_kwh * avg) / (m.priced_kwh * avg) * 100
+            check = f"{gap:+.1f} %"
+        k100 = f"{m.kwh_per_100km:9.1f}" if m.kwh_per_100km is not None else "        -"
+        priced = sum(t.cost_eur is not None for t in tr)
+        print(
+            f"{m.key}  {priced:5d}/{len(tr):<5d} {k100}  {len(home):5d} / {others:<5d}"
+            f"           {check}"
         )
     labels = {}
     for j in r.journeys:

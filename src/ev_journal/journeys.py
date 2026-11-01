@@ -26,6 +26,11 @@ class Trip:
     estimated: bool = False  # homy filled the start (start_check = filled)
     waiting_sec: float | None = None
     waiting_kwh: float | None = None
+    # filled by price.apply()
+    cost_eur: float | None = None
+    price_eur_per_kwh: float | None = None
+    unknown_share: float | None = None
+    price_estimated: bool = False
     # filled by build()
     km: float | None = None
     km_source: str = ""
@@ -41,7 +46,12 @@ class Charge:
     end: int
     kwh: float | None = None  # kWh into the battery
     type: str = "unknown"  # AC, DC or unknown (homy charge_type)
+    soc_start: float | None = None
+    soc_end: float | None = None
     place: Place | None = None
+    # filled by price.apply()
+    cost_eur: float | None = None  # money paid, when known
+    home_cost: bool = False  # the cost comes from the house meter (ioniq_charges)
 
 
 @dataclass
@@ -120,6 +130,16 @@ class Journey:
     def kwh_charged(self) -> float:
         return sum(c.kwh or 0 for c in self.charges)
 
+    @property
+    def cost_eur(self) -> float | None:
+        """The sum of the trip costs; None when a trip has no price."""
+        costs = [t.cost_eur for t in self.trips]
+        return None if None in costs else sum(costs)
+
+    @property
+    def price_estimated(self) -> bool:
+        return any(t.price_estimated for t in self.trips)
+
 
 @dataclass
 class Outing:
@@ -156,6 +176,20 @@ class Month:
     outings: int = 0
     commute_km: float = 0.0
     odo_km: float | None = None
+    # filled by price.apply()
+    spent_eur: float = 0.0  # charges paid (known costs)
+    driving_cost_eur: float = 0.0  # the priced trips
+    priced_km: float = 0.0
+    priced_kwh: float = 0.0
+    drain_kwh: float = 0.0  # lost while parked, seen at each charge
+
+    @property
+    def eur_per_100km(self) -> float | None:
+        return self.driving_cost_eur / self.priced_km * 100 if self.priced_km else None
+
+    @property
+    def kwh_per_100km(self) -> float | None:
+        return self.kwh_used / self.km * 100 if self.km else None
 
     @property
     def gap_pct(self) -> float | None:

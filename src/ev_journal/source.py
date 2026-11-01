@@ -36,6 +36,8 @@ def charges(db: Influx) -> list[Charge]:
             end=int(r["end_ts"]),
             kwh=_f(r.get("energy_in_kwh")),
             type=r.get("charge_type") or "unknown",
+            soc_start=_f(r.get("soc_start")),
+            soc_end=_f(r.get("soc_end")),
         )
         for r in rows
         if r.get("end_ts") is not None
@@ -62,3 +64,12 @@ def odometer(db: Influx, start: int, end: int) -> list[tuple[int, float]]:
         f" AND time >= {start}ms AND time < {end}ms GROUP BY time(1h) fill(none)"
     )
     return [(int(r["time"]), float(r["last"])) for r in rows if r["last"] is not None]
+
+
+def home_costs(db: Influx) -> dict[int, float]:
+    """Cost of each home charge from ioniq_charges, by charge start (ms).
+
+    Its rows start at the same time as the charge rows of ioniq_sessions.
+    """
+    rows = db.query("SELECT cost_eur FROM ioniq_charges WHERE place = 'home'")
+    return {int(r["time"]): float(r["cost_eur"]) for r in rows if r.get("cost_eur") is not None}

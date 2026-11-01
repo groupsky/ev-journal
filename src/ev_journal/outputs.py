@@ -31,6 +31,10 @@ def influx_lines(r: Result) -> list[str]:
                     "start_place": _pid(t.start_place),
                     "end_place": _pid(t.end_place),
                     "estimated": t.estimated,
+                    "cost_eur": t.cost_eur,
+                    "price_eur_per_kwh": t.price_eur_per_kwh,
+                    "price_estimated": t.price_estimated,
+                    "unknown_share": t.unknown_share,
                 },
                 t.start,
             )
@@ -50,6 +54,8 @@ def influx_lines(r: Result) -> list[str]:
                     "kwh_used": j.kwh_used,
                     "kwh_charged": j.kwh_charged,
                     "trips": len(j.trips),
+                    "cost_eur": j.cost_eur,
+                    "price_estimated": j.price_estimated,
                     "label": j.label,
                     "label_by_hand": j.label_by_hand,
                     "not_me": j.not_me,
@@ -86,6 +92,11 @@ def influx_lines(r: Result) -> list[str]:
                     "journeys": m.journeys,
                     "outings": m.outings,
                     "commute_km": m.commute_km,
+                    "spent_eur": m.spent_eur,
+                    "driving_cost_eur": m.driving_cost_eur,
+                    "drain_kwh": m.drain_kwh,
+                    "eur_per_100km": m.eur_per_100km,
+                    "kwh_per_100km": m.kwh_per_100km,
                     "odo_km": m.odo_km,
                     "gap_pct": m.gap_pct,
                 },
@@ -93,6 +104,10 @@ def influx_lines(r: Result) -> list[str]:
             )
         )
     return out
+
+
+def _r(v: float | None, n: int) -> float | None:
+    return None if v is None else round(v, n)
 
 
 def _iso(t: int) -> str:
@@ -119,6 +134,7 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
                 "charge_min": round(j.charge_min),
                 "charges": len(j.charges),
                 "kwh_charged": round(j.kwh_charged, 2),
+                "cost_eur": _r(j.cost_eur, 2),
             }
         )
     key = datetime.fromtimestamp(now / 1000, tz).strftime("%Y-%m")
@@ -133,5 +149,9 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
         "journeys": m.journeys,
         "outings": m.outings,
         "commute_km": round(m.commute_km, 1),
+        "spent_eur": round(m.spent_eur, 2),
+        "driving_cost_eur": round(m.driving_cost_eur, 2),
+        "eur_per_100km": _r(m.eur_per_100km, 2),
+        "kwh_per_100km": _r(m.kwh_per_100km, 1),
     }
     return {"updated": _iso(now), "journeys": last, "month": month}
