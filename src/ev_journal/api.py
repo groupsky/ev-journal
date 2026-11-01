@@ -23,6 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from ev_journal import charges
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -134,6 +135,32 @@ class Command(BaseModel):
     place_id: str | None
     route_id: str | None
     received_at: int
+
+
+class ReceiptIn(BaseModel):
+    amount_eur: float = Field(gt=0)
+    network_kwh: float = Field(gt=0, description="The kWh the network reports.")
+    time: int | None = Field(default=None, description="Time on the receipt, ms.")
+
+
+class ChargePrice(BaseModel):
+    charge_id: int
+    price_eur_per_kwh: float | None = Field(description="EUR per battery kWh.")
+    price_source: Literal["receipt", "answer", "estimate"] | None
+    network_kwh: float | None
+    cost_eur: float | None
+
+
+class Question(BaseModel):
+    id: int = Field(description="The charge id (its start, ms).")
+    date: str = Field(description="Local date of the charge.")
+    station_name: str | None
+    battery_kwh: float | None
+    opened_at: int
+
+
+class AnswerIn(BaseModel):
+    text: str = Field(description='The amount in EUR and the network kWh, e.g. "4.43 11.364".')
 
 
 def _place(r: sqlite3.Row) -> Place:
@@ -440,6 +467,71 @@ def create_app(
         if cur.rowcount == 0:
             response.status_code = 200
         return Command(**dict(row))
+
+    def charge_price(conn, cid: int) -> ChargePrice:
+        row = conn.execute(
+            "SELECT id, price_eur_per_kwh, price_source, network_kwh, cost_eur"
+            " FROM charges WHERE id = ?",
+            (cid,),
+        ).fetchone()
+        return ChargePrice(
+            charge_id=row[0],
+            price_eur_per_kwh=row[1],
+            price_source=row[2],
+            network_kwh=row[3],
+            cost_eur=row[4],
+        )
+
+    @r.post("/charges/{charge_id}/receipt", response_model=ChargePrice, responses=nf)
+    def post_receipt(charge_id: int, p: ReceiptIn, conn=Depends(db)):
+        """A receipt for a charge. It replaces an answer or an estimate."""
+        with write_tx(conn):
+            if not conn.execute("SELECT 1 FROM charges WHERE id = ?", (charge_id,)).fetchone():
+                raise Fail(404, "no such charge")
+            conn.execute(
+                "INSERT OR REPLACE INTO receipts VALUES (?, ?, ?, ?, ?)",
+                (charge_id, p.amount_eur, p.network_kwh, p.time, store.now_ms()),
+            )
+            charges.price(conn, charge_id)
+        return charge_price(conn, charge_id)
+
+    @r.get("/questions", response_model=list[Question])
+    def list_questions(conn=Depends(db)):
+        """Open questions: away charges with no receipt and no answer."""
+        rows = conn.execute(
+            "SELECT charge_id, station_name, battery_kwh, opened_at FROM questions"
+            " WHERE answered_at IS NULL AND charge_id NOT IN (SELECT charge_id FROM receipts)"
+            " ORDER BY charge_id"
+        )
+        return [
+            Question(
+                id=q[0],
+                date=datetime.fromtimestamp(q[0] / 1000, tz).date().isoformat(),
+                station_name=q[1],
+                battery_kwh=q[2],
+                opened_at=q[3],
+            )
+            for q in rows
+        ]
+
+    @r.post("/questions/{question_id}/answer", response_model=ChargePrice, responses=nf)
+    def answer(question_id: int, p: AnswerIn, conn=Depends(db)):
+        """The owner's answer, plain: "<amount EUR> <network kWh>"."""
+        try:
+            amount, kwh = charges.parse_answer(p.text)
+        except ValueError as e:
+            raise Fail(422, str(e)) from e
+        with write_tx(conn):
+            q = conn.execute("SELECT 1 FROM questions WHERE charge_id = ?", (question_id,))
+            if not q.fetchone():
+                raise Fail(404, "no such question")
+            conn.execute(
+                "UPDATE questions SET answered_at = ?, amount_eur = ?, network_kwh = ?"
+                " WHERE charge_id = ?",
+                (store.now_ms(), amount, kwh, question_id),
+            )
+            charges.price(conn, question_id)
+        return charge_price(conn, question_id)
 
     app.include_router(r)
     return app

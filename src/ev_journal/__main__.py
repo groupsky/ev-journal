@@ -11,7 +11,7 @@ import threading
 import time
 from zoneinfo import ZoneInfo
 
-from ev_journal import cleanup, outputs, places, source
+from ev_journal import charges, cleanup, outputs, places, source
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build
 from ev_journal.settings import Settings
@@ -41,6 +41,18 @@ def compute(s: Settings) -> Result:
     )
 
 
+def away(s: Settings, r: Result) -> str:
+    """Update the station feed (daily) and the away charges in the store."""
+    db = places.open_store(s.data_dir)
+    try:
+        now = int(time.time() * 1000)
+        status = charges.update_stations(db, s.data_dir / "fines-locations.geojson", now)
+        charges.sync(db, r, places.all_places(db), now)
+        return status
+    finally:
+        db.close()
+
+
 def run(s: Settings) -> Result:
     r = compute(s)
     db = Influx(s.influx_url, s.influx_db, s.influx_write_user, s.influx_write_password)
@@ -52,9 +64,13 @@ def run(s: Settings) -> Result:
         mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
     reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     deleted = cleanup.cleanup(reader, db, r)
+    try:
+        feed = away(s, r)
+    except Exception as e:  # the main outputs are written already
+        feed = f"failed: {e!r}"
     print(
         f"ev-journal: {len(r.trips)} trips, {len(r.journeys)} journeys, {len(lines)} rows, "
-        f"{deleted} stale deleted"
+        f"{deleted} stale deleted, station feed {feed}"
     )
     return r
 
@@ -108,6 +124,19 @@ def dry_run(s: Settings) -> None:
         labels[j.label] = labels.get(j.label, 0) + 1
     placed = sum(j.start_place is not None and j.end_place is not None for j in r.journeys)
     print(f"labels: {labels}; journeys with both places known: {placed}/{len(r.journeys)}")
+    # The store is local to this run (EVJ_DATA_DIR); nothing goes to InfluxDB or MQTT.
+    print(f"station feed: {away(s, r)}")
+    db = places.open_store(s.data_dir)
+    rows = db.execute("SELECT id, match FROM charges WHERE at_home = 0 ORDER BY id").fetchall()
+    first = next((cid for cid, how in rows if how in ("ok", "unsure")), None)
+    since = [how for cid, how in rows if first is not None and cid >= first]
+    counts = {k: since.count(k) for k in sorted(set(since))}
+    share = (counts.get("ok", 0) + counts.get("unsure", 0)) / len(since) * 100 if since else 0
+    print(
+        f"away charges: {len(rows)}; since the first matched one: {len(since)}, {counts},"
+        f" matched {share:.0f} %"
+    )
+    db.close()
 
 
 def main() -> None:

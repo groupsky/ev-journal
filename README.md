@@ -40,7 +40,8 @@ environment points to.
 - `ev-journal dry-run`: read only. Prints counts per month and the GPS km vs
   odometer gap. Writes nothing to InfluxDB or MQTT.
 
-Outputs and rules: [docs/outputs.md](docs/outputs.md).
+Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/api.md).
+Away charges and their price: [docs/charges.md](docs/charges.md).
 
 ## Develop
 

@@ -31,7 +31,12 @@ def trips(db: Influx) -> list[Trip]:
 def charges(db: Influx) -> list[Charge]:
     rows = db.query("SELECT * FROM ioniq_sessions WHERE kind = 'charge'")
     return [
-        Charge(start=int(r["time"]), end=int(r["end_ts"]), kwh=_f(r.get("energy_in_kwh")))
+        Charge(
+            start=int(r["time"]),
+            end=int(r["end_ts"]),
+            kwh=_f(r.get("energy_in_kwh")),
+            type=r.get("charge_type") or "unknown",
+        )
         for r in rows
         if r.get("end_ts") is not None
     ]

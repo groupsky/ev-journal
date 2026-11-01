@@ -1,6 +1,87 @@
 {
   "components": {
     "schemas": {
+      "AnswerIn": {
+        "properties": {
+          "text": {
+            "description": "The amount in EUR and the network kWh, e.g. \"4.43 11.364\".",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnswerIn",
+        "type": "object"
+      },
+      "ChargePrice": {
+        "properties": {
+          "charge_id": {
+            "title": "Charge Id",
+            "type": "integer"
+          },
+          "cost_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Eur"
+          },
+          "network_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Kwh"
+          },
+          "price_eur_per_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EUR per battery kWh.",
+            "title": "Price Eur Per Kwh"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "receipt",
+                  "answer",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          }
+        },
+        "required": [
+          "charge_id",
+          "price_eur_per_kwh",
+          "price_source",
+          "network_kwh",
+          "cost_eur"
+        ],
+        "title": "ChargePrice",
+        "type": "object"
+      },
       "Command": {
         "properties": {
           "action": {
@@ -378,6 +459,88 @@
         "title": "PlaceList",
         "type": "object"
       },
+      "Question": {
+        "properties": {
+          "battery_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Kwh"
+          },
+          "date": {
+            "description": "Local date of the charge.",
+            "title": "Date",
+            "type": "string"
+          },
+          "id": {
+            "description": "The charge id (its start, ms).",
+            "title": "Id",
+            "type": "integer"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "integer"
+          },
+          "station_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station Name"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "station_name",
+          "battery_kwh",
+          "opened_at"
+        ],
+        "title": "Question",
+        "type": "object"
+      },
+      "ReceiptIn": {
+        "properties": {
+          "amount_eur": {
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "network_kwh": {
+            "description": "The kWh the network reports.",
+            "exclusiveMinimum": 0.0,
+            "title": "Network Kwh",
+            "type": "number"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time on the receipt, ms.",
+            "title": "Time"
+          }
+        },
+        "required": [
+          "amount_eur",
+          "network_kwh"
+        ],
+        "title": "ReceiptIn",
+        "type": "object"
+      },
       "Route": {
         "properties": {
           "id": {
@@ -545,6 +708,76 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/charges/{charge_id}/receipt": {
+      "post": {
+        "description": "A receipt for a charge. It replaces an answer or an estimate.",
+        "operationId": "post_receipt_charges__charge_id__receipt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "charge_id",
+            "required": true,
+            "schema": {
+              "title": "Charge Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargePrice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Post Receipt"
+      }
+    },
     "/commands": {
       "post": {
         "operationId": "post_command_commands_post",
@@ -1024,6 +1257,119 @@
           }
         },
         "summary": "Put Place"
+      }
+    },
+    "/questions": {
+      "get": {
+        "description": "Open questions: away charges with no receipt and no answer.",
+        "operationId": "list_questions_questions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Question"
+                  },
+                  "title": "Response List Questions Questions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Questions"
+      }
+    },
+    "/questions/{question_id}/answer": {
+      "post": {
+        "description": "The owner's answer, plain: \"<amount EUR> <network kWh>\".",
+        "operationId": "answer_questions__question_id__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargePrice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Answer"
       }
     },
     "/routes": {
