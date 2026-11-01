@@ -30,6 +30,8 @@ class Influx:
         for res in data.get("results", []):
             if "error" in res:
                 raise RuntimeError(res["error"])
+            if res.get("partial") or any(x.get("partial") for x in res.get("series", [])):
+                raise RuntimeError("InfluxDB returned a partial result (row limit)")
             for s in res.get("series", []):
                 tags = s.get("tags", {})
                 for v in s["values"]:

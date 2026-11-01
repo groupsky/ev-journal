@@ -13,6 +13,8 @@ from ev_journal.places import Place, place_at
 
 MIN = 60_000
 SPLIT_NOT_CHARGING_MS = 30 * MIN
+# A fix is used for the position at a trip end only when it is this close in time.
+MAX_FIX_AGE_MS = 10 * MIN
 
 
 @dataclass
@@ -176,13 +178,6 @@ class Track:
         i, k = bisect.bisect_left(self.times, start), bisect.bisect_right(self.times, end)
         return self.fixes[i:k]
 
-    def position_at(self, t: int) -> tuple[float, float] | None:
-        """The last fix at or before t."""
-        i = bisect.bisect_right(self.times, t)
-        if i == 0:
-            return None
-        return self.fixes[i - 1][1], self.fixes[i - 1][2]
-
 
 def _overlap(a0: int, a1: int, b0: int, b1: int) -> int:
     return max(0, min(a1, b1) - max(a0, b0))
@@ -225,11 +220,18 @@ def build(
             t.km, t.km_source = track_km(t.fixes), "gps"
         else:
             t.km, t.km_source = t.km_homy, "homy"
-        start_pos = (t.fixes[0][1], t.fixes[0][2]) if t.fixes else track.position_at(t.start)
-        t.start_place = place_at(places, start_pos)
-        t.end_place = place_at(places, track.position_at(t.end))
+        # Only fixes of the trip itself, near its start and end. An old fix could
+        # be from another place.
+        first, last = (t.fixes[0], t.fixes[-1]) if t.fixes else (None, None)
+        if first and first[0] - t.start <= MAX_FIX_AGE_MS:
+            t.start_place = place_at(places, (first[1], first[2]))
+        if last and t.end - last[0] <= MAX_FIX_AGE_MS:
+            t.end_place = place_at(places, (last[1], last[2]))
+    # A charge is at the place where the last trip before it ended.
+    ends = [t.end for t in trips]
     for c in charges:
-        c.place = place_at(places, track.position_at(c.start))
+        i = bisect.bisect_right(ends, c.start)
+        c.place = trips[i - 1].end_place if i else None
 
     # Journeys: split the trips at the stops that split.
     journeys: list[Journey] = []

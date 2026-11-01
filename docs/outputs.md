@@ -16,8 +16,11 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
   destination; the journey ends on arrival.
 - **Outing**: journeys from home until one ends at home. An outing that is
   not home yet is not written.
-- **Place** of a stop: the place whose radius holds the last real GPS fix
-  before it. A real fix has `provider = gps` and `acc_m <= 50`.
+- **Place** of a trip end: the place whose radius holds the last real GPS
+  fix of the trip, when that fix is at most 10 min before the end. The trip
+  start works the same way with its first fix. Otherwise the place is
+  unknown. A real fix has `provider = gps` and `acc_m <= 50`.
+- **Place** of a stop or a charge: where the trip before it ended.
 - **Commute**: a journey between a `home` and a `work` place that starts on
   Monday to Friday (local time, `EVJ_TZ`). Everything else is `other`.
   Holidays and routes come later.

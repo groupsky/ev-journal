@@ -20,6 +20,7 @@ def compute(s: Settings) -> Result:
     if s.places_file:
         places.load_seed(store, s.places_file)
     pl = places.all_places(store)
+    store.close()
     db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     trips, charges = source.trips(db), source.charges(db)
     if not trips:

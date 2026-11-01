@@ -130,3 +130,14 @@ def test_place_at():
     assert place_at(PLACES, (0.1001, 0.1001)) == HOME
     assert place_at(PLACES, (0.15, 0.15)) is None
     assert place_at(PLACES, None) is None
+
+
+def test_trip_without_fixes_has_no_places():
+    # An old fix from before the trip must not give it a place.
+    w = week()
+    t = w.trips[1]  # Mon, work -> home
+    fixes = [f for f in w.fixes if not t.start <= f[0] <= t.end]
+    r = build(w.trips, w.charges, fixes, PLACES, UTC)
+    assert r.trips[1].start_place is None and r.trips[1].end_place is None
+    # The home charge after it has no known place either, so it counts as away.
+    assert r.months[0].kwh_home == 3.0
