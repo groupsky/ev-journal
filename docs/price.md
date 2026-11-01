@@ -19,7 +19,9 @@ everything.
 
 - At each charge the pool is first set to SoC at the start × **kWh per %**.
   The pool keeps its known/unknown split and its price. What the pool lost
-  since the last charge is the **standby drain** of that month.
+  since the last charge is the **standby drain** of that month. It also
+  holds the errors of the trip kWh. When the SoC shows more than the pool,
+  the extra goes in as unknown kWh.
 - kWh per % is the median of battery kWh ÷ SoC change over home charges of
   20 % or more. Until there is one: 0.30.
 - Then the charge goes in: known kWh and its money, or unknown kWh.

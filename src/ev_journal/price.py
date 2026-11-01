@@ -48,9 +48,15 @@ class Pool:
         return self.known_eur / self.known_kwh if self.known_kwh > 0 else None
 
     def scale_to(self, kwh: float) -> float:
-        """Set the pool to kwh, keeping the shares and the price. Returns the drop."""
+        """Set the pool to kwh, keeping the shares and the price. Returns the drop.
+
+        A gain (the SoC shows more than the pool) goes in as unknown kWh: it
+        was never paid for as far as we know.
+        """
         drop = self.kwh - kwh
-        if self.kwh > 0:
+        if self.kwh > 0 and drop < 0:
+            self.unknown_kwh -= drop
+        elif self.kwh > 0:
             f = max(kwh, 0.0) / self.kwh
             self.known_kwh *= f
             self.known_eur *= f
@@ -90,20 +96,20 @@ def apply(r: Result, costs: dict[int, float], home: set[int], tz: ZoneInfo) -> f
                     m.drain_kwh += drop
             c.cost_eur = costs.get(c.start)
             c.home_cost = c.start in home
+            if c.cost_eur is not None and (m := month(c.start)):
+                m.spent_eur += c.cost_eur
             if not c.kwh:
                 continue
             if c.cost_eur is not None:
                 pool.known_kwh += c.kwh
                 pool.known_eur += c.cost_eur
-                if m := month(c.start):
-                    m.spent_eur += c.cost_eur
             else:
                 pool.unknown_kwh += c.kwh
         else:  # a trip
             t = e
             share = pool.unknown_share
             t.unknown_share = share
-            if t.kwh and pool.price is not None and share <= MAX_UNKNOWN_SHARE:
+            if t.kwh is not None and pool.price is not None and share <= MAX_UNKNOWN_SHARE:
                 t.price_eur_per_kwh = pool.price
                 t.cost_eur = t.kwh * pool.price
                 t.price_estimated = share > 0
