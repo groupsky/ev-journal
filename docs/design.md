@@ -32,6 +32,16 @@ Raw data in InfluxDB is kept forever. GPS: about 2,300 points per driving hour, 
 - A journey shows: km, drive time, waiting time, charge time, number of charges, kWh used, kWh charged on the way, and price.
 - **Commute** = a journey between the home and work places (or along the saved route used for it) on a workday. Everything else is "other". A label can be changed by hand. A journey can be marked "not me", and the forecast then does not learn from it.
 
+### Rules decided while building ([#3](https://github.com/groupsky/ev-journal/issues/3))
+
+Accepted by the owner on 2026-11-01.
+
+- A short stop at home **without** a charge does not end the journey.
+- A stop at home **with** a charge always ends the journey and the outing, even under 30 min.
+- An outing that is not home yet is not written.
+- A trip end gets a place only from the trip's own GPS fix, at most 10 min before the end. Otherwise the place is unknown.
+- A charge is at the place where the trip before it ended. A charge with no known place counts as `kwh_unknown`, not home or away.
+
 ## Distance
 
 From the GPS track (real fixes only, accuracy 50 m or better), or from speed over time. The odometer (1 km steps) is a check: per month, the sum of trip km must be within 2 % of the odometer change. A trip whose start was filled (homy marks it) is marked "estimated".

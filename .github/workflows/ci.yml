@@ -11,6 +11,25 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      influxdb:
+        # The same major version as on the home server, with a WRITE-only and a READ-only user.
+        image: influxdb:1.12
+        ports: ["8086:8086"]
+        env:
+          INFLUXDB_HTTP_AUTH_ENABLED: "true"
+          INFLUXDB_DB: t
+          INFLUXDB_ADMIN_USER: adm
+          INFLUXDB_ADMIN_PASSWORD: adm
+          INFLUXDB_WRITE_USER: w
+          INFLUXDB_WRITE_USER_PASSWORD: w
+          INFLUXDB_READ_USER: r
+          INFLUXDB_READ_USER_PASSWORD: r
+    env:
+      EVJ_TEST_INFLUX_URL: http://localhost:8086
+      EVJ_TEST_INFLUX_DB: t
+      EVJ_TEST_WRITE: "w:w"
+      EVJ_TEST_READ: "r:r"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,7 +38,9 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -v
+      - run: |
+          for i in $(seq 30); do curl -sf http://localhost:8086/ping && break; sleep 1; done
+      - run: pytest -v -rs
 
   image:
     runs-on: ubuntu-latest
