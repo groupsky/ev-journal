@@ -30,7 +30,9 @@ everything.
   and unknown kWh in their shares. Regen just stays in the pool.
 - A trip gets a price only when the pool's **unknown share is 10 % or
   less**. Above 0 it is marked `price_estimated`.
-- Not done yet: morning preheat while plugged in (needs #8).
+- Not done yet: morning preheat while plugged in. #8 can tell it apart
+  (a short block after the charge, [home-charge.md](home-charge.md)), but
+  its kWh are not reported per morning yet.
 
 ## Outputs
 

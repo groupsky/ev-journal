@@ -14,9 +14,9 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import charges, cleanup, outputs, places, price, source
+from ev_journal import charges, cleanup, homecharge, outputs, places, price, source
 from ev_journal.influx import Influx
-from ev_journal.journeys import Result, build
+from ev_journal.journeys import Result, build, month_key
 from ev_journal.settings import Settings
 
 
@@ -45,7 +45,42 @@ def compute(s: Settings) -> Result:
     )
     home = source.home_costs(db)
     price.apply(r, {**away_costs, **home}, set(home), ZoneInfo(s.tz))
+    home_charge_model(s, db, r, set(home), end)
     return r
+
+
+def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: int) -> None:
+    """Back-test, drift per month and the live estimate of a home charge (#8)."""
+    tz = ZoneInfo(s.tz)
+    hc = []
+    for c in r.charges:
+        at_home = c.start in home or (c.place is not None and c.place.kind == "home")
+        if not at_home or not c.kwh or c.soc_start is None or c.soc_end is None:
+            continue
+        bs = homecharge.blocks(source.meter_minutes(db, c.start - 5 * 60_000, c.end))
+        meter, _pre = homecharge.split([b for b in bs if b.end >= c.start])
+        if meter > 0:
+            hc.append(
+                homecharge.HomeCharge(
+                    c.start, meter, c.kwh, c.soc_start, c.soc_end, month_key(c.start, tz)[0]
+                )
+            )
+    r.backtest = homecharge.backtest(hc)
+    months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
+    for m in r.months:
+        if mm := months.get(m.key):
+            m.kwh_per_pct, m.meter_ratio = mm.kwh_per_pct, mm.meter_ratio
+            m.overhead_kwh, m.drift_flag = mm.overhead_kwh, mm.drift_flag
+    last = r.trips[-1] if r.trips else None
+    if last is None or last.end_place is None or last.end_place.kind != "home":
+        return
+    bs = [
+        b
+        for b in homecharge.blocks(source.meter_minutes(db, last.end - 5 * 60_000, now))
+        if b.end >= last.end
+    ]
+    soc = source.last_soc(db, bs[0].start) if bs else None
+    r.home_charge = homecharge.live(bs, soc, homecharge.fit(hc), now, s.soc_target)
 
 
 def away(s: Settings, r: Result, data_dir=None, fetch=None) -> str:
@@ -155,6 +190,19 @@ def dry_run(s: Settings) -> None:
             f"{m.key}  {priced:5d}/{len(tr):<5d} {k100}  {len(home):5d} / {others:<5d}"
             f"           {check}"
         )
+    e = r.backtest
+    if e:
+        print(
+            f"home charge SoC back-test: {len(e)} charges, median error"
+            f" {homecharge.quantile(e, 0.5):.2f} %, p90 {homecharge.quantile(e, 0.9):.2f} %"
+        )
+    for m in r.months:
+        if m.meter_ratio is not None:
+            k = f"{m.kwh_per_pct:.3f}" if m.kwh_per_pct is not None else "-"
+            print(
+                f"{m.key}  kWh per % {k}  meter ratio {m.meter_ratio:.3f}"
+                f"  overhead {m.overhead_kwh:.2f} kWh  drift: {m.drift_flag or '-'}"
+            )
     labels = {}
     for j in r.journeys:
         labels[j.label] = labels.get(j.label, 0) + 1

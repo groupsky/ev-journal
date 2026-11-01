@@ -73,3 +73,21 @@ def home_costs(db: Influx) -> dict[int, float]:
     """
     rows = db.query("SELECT cost_eur FROM ioniq_charges WHERE place = 'home'")
     return {int(r["time"]): float(r["cost_eur"]) for r in rows if r.get("cost_eur") is not None}
+
+
+def meter_minutes(db: Influx, start: int, end: int) -> list[tuple[int, float | None, float | None]]:
+    """House charger meter per minute: (t, max power W, last total kWh)."""
+    rows = db.query(
+        "SELECT max(ap) AS w, last(tot_act) AS e FROM xymd1 WHERE \"device.name\" = 'charger'"
+        f" AND time >= {start}ms AND time < {end}ms GROUP BY time(1m) fill(none)"
+    )
+    return [(int(r["time"]), _f(r["w"]), _f(r["e"])) for r in rows]
+
+
+def last_soc(db: Influx, before: int) -> float | None:
+    """The car's last SoC reading in the week before a time."""
+    rows = db.query(
+        "SELECT last(soc) FROM ioniq WHERE \"group\" = 'bms/2101'"
+        f" AND time >= {before - GPS_WINDOW}ms AND time < {before}ms"
+    )
+    return _f(rows[0]["last"]) if rows else None

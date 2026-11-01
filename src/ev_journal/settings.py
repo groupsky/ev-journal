@@ -30,6 +30,9 @@ class Settings:
     interval_sec: int
     api_host: str
     api_port: int
+    soc_target: float = 80.0
+    drift_pct: float = 3.0
+    drift_kwh: float = 0.5
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -49,4 +52,7 @@ class Settings:
             interval_sec=int(e.get("EVJ_INTERVAL_SEC", "900")),
             api_host=e.get("EVJ_API_HOST", "0.0.0.0"),
             api_port=int(e.get("EVJ_API_PORT", "8080")),
+            soc_target=float(e.get("EVJ_SOC_TARGET", "80")),
+            drift_pct=float(e.get("EVJ_DRIFT_PCT", "3")),
+            drift_kwh=float(e.get("EVJ_DRIFT_KWH", "0.5")),
         )

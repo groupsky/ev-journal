@@ -182,6 +182,11 @@ class Month:
     priced_km: float = 0.0
     priced_kwh: float = 0.0
     drain_kwh: float = 0.0  # lost while parked, seen at each charge
+    # filled by homecharge.drift()
+    kwh_per_pct: float | None = None
+    meter_ratio: float | None = None
+    overhead_kwh: float | None = None
+    drift_flag: str = ""
 
     @property
     def eur_per_100km(self) -> float | None:
@@ -206,6 +211,8 @@ class Result:
     months: list[Month]
     charges: list[Charge] = field(default_factory=list)
     track: "Track | None" = None
+    home_charge: dict | None = None  # the live estimate (homecharge.live)
+    backtest: list[float] = field(default_factory=list)  # end SoC errors, %
 
 
 class Track:
@@ -241,7 +248,7 @@ def _label(j: Journey, tz: ZoneInfo) -> str:
     return "commute" if kinds == {"home", "work"} and _is_workday(j.start, tz) else "other"
 
 
-def _month_key(t: int, tz: ZoneInfo) -> tuple[str, int]:
+def month_key(t: int, tz: ZoneInfo) -> tuple[str, int]:
     d = datetime.fromtimestamp(t / 1000, tz)
     first = d.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     return f"{d.year:04d}-{d.month:02d}", int(first.timestamp() * 1000)
@@ -335,7 +342,7 @@ def build(
     months: dict[str, Month] = {}
 
     def month(t: int) -> Month:
-        key, start = _month_key(t, tz)
+        key, start = month_key(t, tz)
         return months.setdefault(key, Month(start=start, key=key))
 
     for t in trips:

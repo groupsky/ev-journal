@@ -79,6 +79,8 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `spent_eur`, `driving_cost_eur`, `drain_kwh`, `eur_per_100km`, `kwh_per_100km` | the price ([price.md](price.md)) |
 | `odo_km` | odometer change in the month |
 | `gap_pct` | (`km` − `odo_km`) / `odo_km` × 100 |
+| `kwh_per_pct`, `meter_ratio`, `overhead_kwh` | the battery model of the month's home charges ([home-charge.md](home-charge.md#drift)) |
+| `drift_flag` | why a value of the model moved against its 3-month median; empty when none did |
 
 ### `ev_track` — track points for Grafana's Geomap
 
@@ -122,11 +124,19 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "month": {"month": "2026-01", "km": 624.1, "kwh_used": 36.0, "kwh_home": 23.0,
             "kwh_away": 40.0, "kwh_unknown": 0.0, "journeys": 10, "outings": 4, "commute_km": 99.5,
             "spent_eur": 0.0, "driving_cost_eur": 0.0, "eur_per_100km": null,
-            "kwh_per_100km": 5.8}
+            "kwh_per_100km": 5.8, "drift_flag": ""},
+  "home_charge": {"running": true, "since": "…Z", "soc_plugin": 30.0, "soc_now": 52.4,
+                  "meter_kwh": 8.6, "target": 80.0, "meter_kwh_to_target": 9.4,
+                  "min_to_target": 462}
 }
 ```
 
 `journeys` holds the last 10, newest first. `month` is the current month.
+
+`home_charge` is the SoC estimate of a home charge since the car last came
+home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`
+when the meter has shown no charging for 2 min; `min_to_target` is then
+`null`.
 
 ## Places seed
 
