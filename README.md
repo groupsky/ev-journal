@@ -32,7 +32,7 @@ environment points to.
 ## Develop
 
 ```sh
-uv venv && uv pip install -e '.[dev]'
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```

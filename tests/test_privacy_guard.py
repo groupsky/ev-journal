@@ -2,6 +2,9 @@
 
 The test area is within 1 degree of 0 N 0 E, which is open sea. Tests and
 fixtures put their made-up places there. A real place anywhere else fails CI.
+
+A line that ends with "privacy: ok" is skipped. Use it only for numbers that
+are not coordinates, and say so in the PR.
 """
 
 import re
@@ -10,34 +13,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEST_AREA_DEG = 1.0
+ESCAPE = "privacy: ok"
 
-NUM = r"[-+]?\d{1,3}\.\d+"
-# Two decimals with 3+ places side by side: "42.123, 23.456" or "(42.123 23.456)".
-PAIR = re.compile(rf"(?<![\w.])({NUM})\s*[,;\s]\s*({NUM})(?![\w.])")
-# A number after a lat/lon key: lat=42.1, "lon": 23.4, lng: 23.4
-KEYED = re.compile(rf"\b(lat|latitude|lon|lng|longitude)\b[\"']?\s*[:=]\s*[\"']?({NUM})", re.I)
+NUM = r"[-+]?\d{1,3}(?:\.\d+)?"
+# Two numbers with 2+ decimals, split by a comma or a semicolon.
+PAIR = re.compile(r"(?<![\w.])([-+]?\d{1,3}\.\d{2,})\s*[,;]\s*([-+]?\d{1,3}\.\d{2,})(?![\w.])")
+# A number after a lat/lon key, also as home_lat or startLng.
+KEYED = re.compile(
+    r"(?:\b|_|(?<=[a-z])(?=[A-Z]))(?i:lat|latitude|lon|lng|longitude)\b"
+    rf"[\"']?\s*[:=]\s*[\"']?({NUM})"
+)
 
 
-def _decimals(s: str) -> int:
-    return len(s.split(".")[1])
+def _outside(lat: float, lon: float) -> bool:
+    return abs(lat) > TEST_AREA_DEG or abs(lon) > TEST_AREA_DEG
 
 
-def find_points(text: str) -> list[tuple[float, float]]:
-    """Return the (lat, lon)-like numbers in the text that lie outside the test area."""
+def find_points(text: str) -> list[str]:
+    """Return the coordinates in the text that lie outside the test area."""
     bad = []
-    for m in PAIR.finditer(text):
-        a, b = m.group(1), m.group(2)
-        if _decimals(a) < 3 or _decimals(b) < 3:
+    for line in text.splitlines():
+        if line.rstrip().endswith(ESCAPE):
             continue
-        lat, lon = float(a), float(b)
-        if abs(lat) > 90 or abs(lon) > 180:
-            continue
-        if abs(lat) > TEST_AREA_DEG or abs(lon) > TEST_AREA_DEG:
-            bad.append((lat, lon))
-    for m in KEYED.finditer(text):
-        v = float(m.group(2))
-        if abs(v) > TEST_AREA_DEG and abs(v) <= 180:
-            bad.append((v, v))
+        for m in PAIR.finditer(line):
+            a, b = float(m.group(1)), float(m.group(2))
+            # Either (lat, lon) or GeoJSON (lon, lat) may be a valid point.
+            valid = (abs(a) <= 90 and abs(b) <= 180) or (abs(b) <= 90 and abs(a) <= 180)
+            if valid and _outside(a, b):
+                bad.append(m.group(0))
+        for m in KEYED.finditer(line):
+            v = float(m.group(1))
+            if TEST_AREA_DEG < abs(v) <= 180:
+                bad.append(m.group(0))
     return bad
 
 
@@ -53,18 +60,35 @@ def _repo_files() -> list[Path]:
 
 
 def test_detector_catches_points_outside_the_area():
-    assert find_points("at = (10.5000, -30.2500)")
-    assert find_points('{"lat": 0.0, "lon": -20.0}')
-    assert not find_points("home = (0.1234, -0.5678)")
-    assert not find_points('{"lat": 0.25, "lon": 0.75}')
-    assert not find_points("python 3.12, ruff 0.6")
+    caught = [
+        "at = (10.5000, -30.2500)",  # privacy: ok
+        '{"lat": 0.0, "lon": -20.0}',  # privacy: ok
+        "[-140.25, 10.75]",  # privacy: ok
+        "5.50,-20.50",  # privacy: ok
+        '{"lat":10,"lon":-30}',  # privacy: ok
+        "home_lat = 10.5",  # privacy: ok
+        "startLng: -30.25",  # privacy: ok
+    ]
+    for s in caught:
+        assert find_points(s), s
+    ok = [
+        "home = (0.1234, -0.5678)",
+        '{"lat": 0.25, "lon": 0.75}',
+        "[-0.5, 0.25]",
+        "python 3.12, ruff 0.6",
+        "3.14159 2.71828",
+        "latency = 30",
+        "semicolon: 42",
+        "xlon = 30",
+        "x = 10.5, -30.25  # privacy: ok",
+    ]
+    for s in ok:
+        assert not find_points(s), s
 
 
 def test_no_real_coordinates_in_repo():
     found = {}
     for path in _repo_files():
-        if path == Path(__file__).resolve():
-            continue
         try:
             text = path.read_text()
         except UnicodeDecodeError:
