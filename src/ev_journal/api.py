@@ -200,10 +200,10 @@ class Fail(Exception):
 
 
 @contextmanager
-def write_tx(conn: sqlite3.Connection):
-    """One write transaction that locks the file, so reads and writes inside it
-    see no other writer."""
-    conn.execute("BEGIN IMMEDIATE")
+def write_tx(conn: sqlite3.Connection, mode: str = "IMMEDIATE"):
+    """One transaction. IMMEDIATE locks the file for writing, so reads and
+    writes inside it see no other writer. DEFERRED is a stable view for reads."""
+    conn.execute(f"BEGIN {mode}")
     try:
         yield
         conn.execute("COMMIT")
@@ -255,7 +255,7 @@ def create_app(
 
     # Places and routes share the same sync rules.
     def list_rows(conn, table, conv, changed_since):
-        with write_tx(conn):  # a stable view: no write between the rows and the cursor
+        with write_tx(conn, "DEFERRED"):  # one view for the rows and the cursor
             cursor = conn.execute(f"SELECT COALESCE(MAX(seq), 0) FROM {table}").fetchone()[0]
             if changed_since is None:
                 rows = list(conn.execute(f"SELECT * FROM {table} WHERE deleted = 0 ORDER BY id"))
@@ -285,12 +285,12 @@ def create_app(
 
     def save(conn, table, id_, cols, seen: int | None, create: bool) -> Written:
         with write_tx(conn):
-            if callable(cols):
-                cols = cols()
             old = conn.execute(f"SELECT version, deleted FROM {table} WHERE id = ?", (id_,))
             old = old.fetchone()
             if (old is None or old["deleted"]) and not create:
                 raise Fail(404, "not found")
+            if callable(cols):
+                cols = cols()
             version = (old["version"] if old else 0) + 1
             stale = old is not None and seen is not None and seen < old["version"]
             t = store.now_ms()

@@ -172,6 +172,8 @@ def test_errors_have_one_shape(client):
         client.get("/places", params={"changed_since": "soon"}),
     ):
         assert resp.status_code == 422 and isinstance(resp.json()["detail"], str)
+    unknown = client.put("/routes/nope", json={"name": "r", "place_ids": ["nope"]})
+    assert unknown.status_code == 404
 
 
 def test_a_place_in_a_route_cannot_be_deleted(client):
