@@ -1,0 +1,384 @@
+"""The HTTP API for the store. See docs/api.md and docs/openapi.json.
+
+Every route needs `Authorization: Bearer <token>`. The token comes from a
+file outside the repo (EVJ_API_TOKEN_FILE). Without a token, every request
+is refused.
+"""
+
+import hmac
+import json
+import sqlite3
+import statistics
+import sys
+import uuid
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel, Field
+
+from ev_journal import places as store
+from ev_journal.geo import dist_m
+
+Kind = Literal["home", "work", "station", "other"]
+SUGGEST_RADIUS_M = 100.0
+SUGGEST_MIN_VISITS = 3
+
+
+class Error(BaseModel):
+    detail: str
+
+
+class PlaceIn(BaseModel):
+    name: str = Field(min_length=1)
+    aliases: list[str] = []
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    radius_m: float = Field(default=150, gt=0)
+    kind: Kind = "other"
+    destination: bool = False
+    version: int | None = Field(default=None, description="The version the client saw.")
+
+
+class Place(BaseModel):
+    id: str
+    name: str
+    aliases: list[str]
+    lat: float
+    lon: float
+    radius_m: float
+    kind: Kind
+    destination: bool
+    version: int
+    updated_at: int
+
+
+class RouteIn(BaseModel):
+    name: str = Field(min_length=1)
+    place_ids: list[str] = Field(min_length=1)
+    version: int | None = Field(default=None, description="The version the client saw.")
+
+
+class Route(BaseModel):
+    id: str
+    name: str
+    place_ids: list[str]
+    version: int
+    updated_at: int
+
+
+class Deleted(BaseModel):
+    id: str
+    version: int
+    updated_at: int
+
+
+class Written(BaseModel):
+    id: str
+    version: int
+    updated_at: int
+    stale: bool = Field(description="The client's version was old; its write still won.")
+
+
+class PlaceList(BaseModel):
+    items: list[Place]
+    deleted: list[Deleted]
+    now: int = Field(description="Use as changed_since next time.")
+
+
+class RouteList(BaseModel):
+    items: list[Route]
+    deleted: list[Deleted]
+    now: int
+
+
+class Suggestion(BaseModel):
+    lat: float
+    lon: float
+    visits: int
+    typical_hour: int = Field(description="Median local hour of arrival.")
+
+
+class LabelIn(BaseModel):
+    label: Literal["commute", "other"] | None = None
+    not_me: bool = False
+
+
+class Label(BaseModel):
+    journey_id: int
+    label: Literal["commute", "other"] | None
+    not_me: bool
+    updated_at: int
+
+
+class CommandIn(BaseModel):
+    client_id: str = Field(min_length=1, description="Unique per command; a repeat is ignored.")
+    time: int
+    text: str
+    action: str
+    place_id: str | None = None
+    route_id: str | None = None
+
+
+class Command(BaseModel):
+    client_id: str
+    time: int
+    text: str
+    action: str
+    place_id: str | None
+    route_id: str | None
+    received_at: int
+
+
+def _place(r: sqlite3.Row) -> Place:
+    return Place(
+        id=r["id"],
+        name=r["name"],
+        aliases=json.loads(r["aliases"]),
+        lat=r["lat"],
+        lon=r["lon"],
+        radius_m=r["radius_m"],
+        kind=r["kind"],
+        destination=bool(r["destination"]),
+        version=r["version"],
+        updated_at=r["updated_at"],
+    )
+
+
+def _route(r: sqlite3.Row) -> Route:
+    return Route(
+        id=r["id"],
+        name=r["name"],
+        place_ids=json.loads(r["place_ids"]),
+        version=r["version"],
+        updated_at=r["updated_at"],
+    )
+
+
+def suggestions(
+    stops: list[tuple[int, float, float]], known: list[store.Place], tz: ZoneInfo
+) -> list[Suggestion]:
+    """Frequent stops outside every place. stops are (t, lat, lon) of journey ends."""
+    free = [s for s in stops if store.place_at(known, (s[1], s[2])) is None]
+    out = []
+    while free:
+        # The stop with the most neighbours starts the next cluster.
+        def near(c, pts=free):
+            return [s for s in pts if dist_m(c[1], c[2], s[1], s[2]) <= SUGGEST_RADIUS_M]
+
+        centre = max(free, key=lambda c: len(near(c)))
+        group = near(centre)
+        if len(group) < SUGGEST_MIN_VISITS:
+            break
+        free = [s for s in free if s not in group]
+        hours = [datetime.fromtimestamp(s[0] / 1000, tz).hour for s in group]
+        out.append(
+            Suggestion(
+                lat=statistics.fmean(s[1] for s in group),
+                lon=statistics.fmean(s[2] for s in group),
+                visits=len(group),
+                typical_hour=int(statistics.median_low(hours)),
+            )
+        )
+    return out
+
+
+def create_app(
+    db_path: Path,
+    token: str | None,
+    tz: ZoneInfo,
+    stops: Callable[[], list[tuple[int, float, float]]] = list,
+) -> FastAPI:
+    """stops gives the (t, lat, lon) of journey ends from the last recompute."""
+
+    def db():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def auth(request: Request):
+        got = request.headers.get("authorization", "")
+        if not token or not hmac.compare_digest(got.encode(), f"Bearer {token}".encode()):
+            raise HTTPException(401, "missing or wrong token")
+
+    app = FastAPI(title="ev-journal", version="1")
+    r = APIRouter(
+        dependencies=[Depends(auth)],
+        responses={401: {"model": Error}},
+    )
+    nf = {404: {"model": Error}}
+
+    # Places and routes share the same sync rules.
+    def list_rows(conn, table, conv, changed_since):
+        t = store.now_ms()
+        if changed_since is None:
+            rows = conn.execute(f"SELECT * FROM {table} WHERE deleted = 0 ORDER BY id")
+            return [conv(x) for x in rows], [], t
+        rows = list(
+            conn.execute(
+                f"SELECT * FROM {table} WHERE updated_at >= ? ORDER BY id", (changed_since,)
+            )
+        )
+        items = [conv(x) for x in rows if not x["deleted"]]
+        gone = [
+            Deleted(id=x["id"], version=x["version"], updated_at=x["updated_at"])
+            for x in rows
+            if x["deleted"]
+        ]
+        return items, gone, t
+
+    def get_row(conn, table, id_):
+        row = conn.execute(f"SELECT * FROM {table} WHERE id = ? AND deleted = 0", (id_,))
+        row = row.fetchone()
+        if row is None:
+            raise HTTPException(404, "not found")
+        return row
+
+    def save(conn, table, id_, cols: dict, seen: int | None, create: bool) -> Written:
+        old = conn.execute(f"SELECT version, deleted FROM {table} WHERE id = ?", (id_,))
+        old = old.fetchone()
+        if old is None or old["deleted"]:
+            if not create:
+                raise HTTPException(404, "not found")
+        version = (old["version"] if old else 0) + 1
+        stale = old is not None and seen is not None and seen < old["version"]
+        t = store.now_ms()
+        cols = {**cols, "id": id_, "version": version, "updated_at": t, "deleted": 0}
+        names = ", ".join(cols)
+        marks = ", ".join("?" for _ in cols)
+        with conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({marks})", list(cols.values())
+            )
+        return Written(id=id_, version=version, updated_at=t, stale=stale)
+
+    def remove(conn, table, id_, seen: int | None) -> Written:
+        old = get_row(conn, table, id_)
+        t = store.now_ms()
+        with conn:
+            conn.execute(
+                f"UPDATE {table} SET deleted = 1, version = ?, updated_at = ? WHERE id = ?",
+                (old["version"] + 1, t, id_),
+            )
+        stale = seen is not None and seen < old["version"]
+        return Written(id=id_, version=old["version"] + 1, updated_at=t, stale=stale)
+
+    def place_cols(p: PlaceIn) -> dict:
+        return {
+            "name": p.name,
+            "aliases": json.dumps(p.aliases),
+            "lat": p.lat,
+            "lon": p.lon,
+            "radius_m": p.radius_m,
+            "kind": p.kind,
+            "destination": int(p.destination),
+        }
+
+    def route_cols(conn, p: RouteIn) -> dict:
+        ids = p.place_ids
+        known = {
+            x["id"]
+            for x in conn.execute(
+                f"SELECT id FROM places WHERE deleted = 0 AND id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+        }
+        if missing := [i for i in ids if i not in known]:
+            raise HTTPException(422, f"unknown place ids: {missing}")
+        return {"name": p.name, "place_ids": json.dumps(ids)}
+
+    @r.get("/places", response_model=PlaceList)
+    def list_places(changed_since: int | None = None, conn=Depends(db)):
+        items, gone, t = list_rows(conn, "places", _place, changed_since)
+        return PlaceList(items=items, deleted=gone, now=t)
+
+    @r.get("/places/suggestions", response_model=list[Suggestion])
+    def place_suggestions(conn=Depends(db)):
+        return suggestions(stops(), store.all_places(conn), tz)
+
+    @r.post("/places", response_model=Written, status_code=201)
+    def create_place(p: PlaceIn, conn=Depends(db)):
+        return save(conn, "places", uuid.uuid4().hex[:12], place_cols(p), None, True)
+
+    @r.get("/places/{place_id}", response_model=Place, responses=nf)
+    def get_place(place_id: str, conn=Depends(db)):
+        return _place(get_row(conn, "places", place_id))
+
+    @r.put("/places/{place_id}", response_model=Written, responses=nf)
+    def put_place(place_id: str, p: PlaceIn, conn=Depends(db)):
+        return save(conn, "places", place_id, place_cols(p), p.version, False)
+
+    @r.delete("/places/{place_id}", response_model=Written, responses=nf)
+    def delete_place(place_id: str, version: int | None = None, conn=Depends(db)):
+        return remove(conn, "places", place_id, version)
+
+    @r.get("/routes", response_model=RouteList)
+    def list_routes(changed_since: int | None = None, conn=Depends(db)):
+        items, gone, t = list_rows(conn, "routes", _route, changed_since)
+        return RouteList(items=items, deleted=gone, now=t)
+
+    @r.post("/routes", response_model=Written, status_code=201, responses={422: {"model": Error}})
+    def create_route(p: RouteIn, conn=Depends(db)):
+        return save(conn, "routes", uuid.uuid4().hex[:12], route_cols(conn, p), None, True)
+
+    @r.get("/routes/{route_id}", response_model=Route, responses=nf)
+    def get_route(route_id: str, conn=Depends(db)):
+        return _route(get_row(conn, "routes", route_id))
+
+    @r.put("/routes/{route_id}", response_model=Written, responses=nf)
+    def put_route(route_id: str, p: RouteIn, conn=Depends(db)):
+        return save(conn, "routes", route_id, route_cols(conn, p), p.version, False)
+
+    @r.delete("/routes/{route_id}", response_model=Written, responses=nf)
+    def delete_route(route_id: str, version: int | None = None, conn=Depends(db)):
+        return remove(conn, "routes", route_id, version)
+
+    @r.put("/journeys/{journey_id}/label", response_model=Label)
+    def put_label(journey_id: int, p: LabelIn, conn=Depends(db)):
+        """Set the label and "not me" of the journey that contains this time.
+
+        The journey id is its start time (ms). A recompute keeps the label.
+        """
+        t = store.now_ms()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO labels VALUES (?, ?, ?, ?)",
+                (journey_id, p.label, int(p.not_me), t),
+            )
+        return Label(journey_id=journey_id, label=p.label, not_me=p.not_me, updated_at=t)
+
+    @r.post(
+        "/commands",
+        response_model=Command,
+        status_code=201,
+        responses={200: {"model": Command, "description": "A repeat; ignored."}},
+    )
+    def post_command(c: CommandIn, response: Response, conn=Depends(db)):
+        with conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO commands VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (c.client_id, c.time, c.text, c.action, c.place_id, c.route_id, store.now_ms()),
+            )
+        if cur.rowcount == 0:
+            response.status_code = 200
+        row = conn.execute("SELECT * FROM commands WHERE client_id = ?", (c.client_id,))
+        return Command(**dict(row.fetchone()))
+
+    app.include_router(r)
+    return app
+
+
+def openapi() -> dict:
+    return create_app(Path("/nonexistent"), None, ZoneInfo("UTC")).openapi()
+
+
+if __name__ == "__main__":
+    # python -m ev_journal.api > docs/openapi.json
+    json.dump(openapi(), sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")

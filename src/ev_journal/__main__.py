@@ -1,11 +1,13 @@
 """ev-journal [loop|run|dry-run]
 
-loop (the default): run every EVJ_INTERVAL_SEC seconds.
+loop (the default): run every EVJ_INTERVAL_SEC seconds, and serve the API
+  on EVJ_API_PORT when EVJ_API_TOKEN_FILE is set.
 run: read, recompute everything, write to InfluxDB and MQTT once.
 dry-run: read and recompute, print counts per month, write nothing.
 """
 
 import sys
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -20,11 +22,12 @@ def compute(s: Settings) -> Result:
     if s.places_file:
         places.load_seed(store, s.places_file)
     pl = places.all_places(store)
+    labels = places.all_labels(store)
     store.close()
     db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     trips, charges = source.trips(db), source.charges(db)
     if not trips:
-        return build([], [], [], pl, ZoneInfo(s.tz))
+        return build([], [], [], pl, ZoneInfo(s.tz), labels=labels)
     start = min(t.start for t in trips) - 86_400_000
     end = int(time.time() * 1000) + 60_000
     return build(
@@ -34,10 +37,11 @@ def compute(s: Settings) -> Result:
         pl,
         ZoneInfo(s.tz),
         odometer=source.odometer(db, start, end),
+        labels=labels,
     )
 
 
-def run(s: Settings) -> None:
+def run(s: Settings) -> Result:
     r = compute(s)
     db = Influx(s.influx_url, s.influx_db, s.influx_write_user, s.influx_write_password)
     lines = outputs.influx_lines(r)
@@ -52,6 +56,24 @@ def run(s: Settings) -> None:
         f"ev-journal: {len(r.trips)} trips, {len(r.journeys)} journeys, {len(lines)} rows, "
         f"{deleted} stale deleted"
     )
+    return r
+
+
+def journey_ends(r: Result) -> list[tuple[int, float, float]]:
+    return [(j.end, *j.trips[-1].end_pos) for j in r.journeys if j.trips[-1].end_pos]
+
+
+def serve_api(s: Settings, state: dict) -> None:
+    import uvicorn
+
+    from ev_journal.api import create_app
+
+    places.open_store(s.data_dir).close()  # create or upgrade the tables
+    app = create_app(
+        places.store_path(s.data_dir), s.api_token, ZoneInfo(s.tz), lambda: state["stops"]
+    )
+    server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
+    threading.Thread(target=server.run, daemon=True).start()
 
 
 def dry_run(s: Settings) -> None:
@@ -84,9 +106,12 @@ def main() -> None:
     elif cmd == "run":
         run(s)
     elif cmd == "loop":
+        state = {"stops": []}
+        if s.api_token:
+            serve_api(s, state)
         while True:
             try:
-                run(s)
+                state["stops"] = journey_ends(run(s))
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
             time.sleep(s.interval_sec)

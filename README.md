@@ -27,10 +27,11 @@ environment points to.
 | `EVJ_INFLUX_WRITE_PASSWORD_FILE` | file with the write password | — |
 | `EVJ_MQTT_URL` | MQTT broker, for example `mqtt://broker:1883` | — |
 | `EVJ_DATA_DIR` | folder for the SQLite store | `/data` |
-| `EVJ_API_TOKEN_FILE` | file with the API token | — |
+| `EVJ_API_TOKEN_FILE` | file with the API token; no file, no API | — |
 | `EVJ_PLACES_FILE` | places seed file ([format](docs/outputs.md#places-seed)) | — |
 | `EVJ_TZ` | time zone for months and workdays | `UTC` |
 | `EVJ_INTERVAL_SEC` | seconds between runs | `900` |
+| `EVJ_API_HOST`, `EVJ_API_PORT` | where the [API](docs/api.md) listens | `0.0.0.0`, `8080` |
 
 ## Run
 

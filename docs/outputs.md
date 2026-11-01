@@ -57,6 +57,8 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `kwh_charged` | kWh into the battery on the way |
 | `trips` | number of trips |
 | `label` | `commute` or `other` |
+| `label_by_hand` | `true` when the label was set through the API |
+| `not_me` | `true` when marked "not me" through the API |
 | `start_place`, `end_place` | place ids, when known |
 
 ### `ev_outings` — one row per outing, at its start
@@ -111,7 +113,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "updated": "2026-01-10T10:30:00Z",
   "journeys": [
     {"id": 1768039200000, "start": "…Z", "end": "…Z", "from": "Test Home", "to": "Test Work",
-     "label": "other", "km": 25.0, "kwh_used": 3.0, "drive_min": 30, "waiting_min": 0,
+     "label": "other", "not_me": false, "km": 25.0, "kwh_used": 3.0, "drive_min": 30, "waiting_min": 0,
      "charge_min": 0, "charges": 0, "kwh_charged": 0.0}
   ],
   "month": {"month": "2026-01", "km": 624.1, "kwh_used": 36.0, "kwh_home": 23.0,
@@ -123,12 +125,13 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
 
 ## Places seed
 
-`EVJ_PLACES_FILE` points to a JSON list outside the repo. Each run loads it
-into the SQLite store (`EVJ_DATA_DIR/ev-journal.sqlite`) and replaces the
-places there:
+`EVJ_PLACES_FILE` points to a JSON list outside the repo. It is imported once
+into an empty SQLite store (`EVJ_DATA_DIR/ev-journal.sqlite`). After that the
+places are changed through the [API](api.md):
 
 ```json
 [{"id": "p-home", "name": "Test Home", "kind": "home", "lat": 0.1, "lon": 0.1, "radius_m": 150}]
 ```
 
 `kind` is `home`, `work`, `station` or `other`. `radius_m` defaults to 150.
+`aliases` (a list) and `destination` (a bool) are optional.
