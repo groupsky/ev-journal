@@ -16,7 +16,7 @@ POOL_DAYS = 28  # learn from the days of the same kind in this many days before
 MIN_POOL = 3
 BAD_MARGIN_KWH = 2.0
 SCORE_DAYS = 91  # about the last 3 months
-STEP_MIN = 15  # the start time is set in steps of this many minutes
+STEP_MIN = 15  # default step of the car's charge timer, in minutes
 TARGET_STEP = 5  # the target SoC is rounded up to this many %
 
 # The car's AC levels: (name, meter kW, battery kW), measured 2024-11 → 2026-10.
@@ -24,16 +24,22 @@ LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
 LEVEL_BG = {"low": "ниско", "mid": "средно", "high": "високо"}
 
 
-def day_type(d: date, holidays: set[date]) -> str:
-    """workday, weekend or holiday (official holidays and extra days off)."""
+def day_type(d: date, holidays: set[date], ranges=()) -> str:
+    """workday, weekend or holiday (official holidays and extra days off).
+
+    ranges: (name, first, last) date ranges of extra day types. A workday
+    inside a range gets that name; weekends and holidays keep theirs.
+    """
     if d.weekday() >= 5:
         return "weekend"
-    return "holiday" if d in holidays else "workday"
+    if d in holidays:
+        return "holiday"
+    return next((name for name, a, b in ranges if a <= d <= b), "workday")
 
 
 def kind(dtype: str) -> str:
-    """Forecast pools: workdays, and the rest ("off")."""
-    return "workday" if dtype == "workday" else "off"
+    """Forecast pools: workdays (extra types too), and the rest ("off")."""
+    return "off" if dtype in ("weekend", "holiday") else "workday"
 
 
 def daily_need(r: Result, tz: ZoneInfo, until: date) -> dict[date, float]:
@@ -143,6 +149,7 @@ def advise(
     departure: datetime | None,
     reserve_pct: float,
     now: datetime | None = None,
+    step_min: int = STEP_MIN,
 ) -> Advice:
     """The lowest level that reaches the target inside the night zone, ending
     as close to departure as the zone allows. The charge starts no earlier
@@ -160,7 +167,7 @@ def advise(
     window_min = max((end - z0).total_seconds() / 60, 0)
     for name, _meter_kw, kw in LEVELS:
         minutes = (target - soc_now) * kwh_per_pct / kw * 60
-        minutes = math.ceil(minutes / STEP_MIN) * STEP_MIN
+        minutes = math.ceil(minutes / step_min) * step_min
         if minutes <= window_min:
             start = end - timedelta(minutes=minutes)
             return Advice(target, name, start.astimezone(tz), end.astimezone(tz))
@@ -206,6 +213,9 @@ def plan(
     departure: str | None = None,
     reserve_pct: float = 10.0,
     preheat: bool = False,
+    departures: dict[str, str | None] | None = None,
+    ranges=(),
+    step_min: int = STEP_MIN,
 ) -> dict | None:
     """Fill r.forecasts (the scored last days) and return the advice for the
     next morning: tomorrow in the evening, today after midnight.
@@ -222,11 +232,12 @@ def plan(
     f = forecast(daily_need(r, tz, min(day - timedelta(days=1), today)), day, hols)
     if f is None or soc_now is None:
         return None
-    dep = None
-    if departure and f.day_type == "workday":
-        dep = datetime.combine(day, time.fromisoformat(departure), tz)
+    f.day_type = day_type(day, hols, ranges)
+    # The departure of the day type; else the default. None: the zone end.
+    hhmm = (departures or {}).get(f.day_type, departure)
+    dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None
     zone = night_zone(day - timedelta(days=1), tz)
-    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local)
+    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min)
     preheat_off = preheat and f.day_type == "holiday"
     return {
         "day": day.isoformat(),
@@ -238,6 +249,7 @@ def plan(
         "level": a.level,
         "start": a.start.isoformat() if a.start else None,
         "end": a.end.isoformat() if a.end else None,
+        "departure": dep.isoformat() if dep else None,
         "capped": a.capped,
         "preheat_off": preheat_off,
         "message": message(f, soc_now, a, preheat_off),

@@ -121,4 +121,5 @@ The ratio and the overhead of a month move together: 2026-08 has the lowest
 overhead and so the highest ratio. With only one month before it, its
 median is that one month. Battery kWh ÷ E without the overhead (0.810,
 0.831, 0.815, 0.788) flags 2026-10 instead (−3.4 %), the coldest month
-(median 13.5 °C). A year of data will tell which limit is right.
+(median 13.5 °C). The limit stays at 3 % for now. Check it again when
+there is a year of data, so every season is in it.

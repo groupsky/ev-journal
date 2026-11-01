@@ -4,8 +4,11 @@ Nothing secret or private is stored in the repo.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date, time
 from pathlib import Path
+
+DEPARTURE_PREFIX = "EVJ_DEPARTURE_"
 
 
 def _read_file(path: str | None) -> str | None:
@@ -38,6 +41,9 @@ class Settings:
     departure: str | None = None
     reserve_pct: float = 10.0
     preheat: bool = False
+    timer_step_min: int = 15
+    departures: dict[str, str | None] = field(default_factory=dict)  # day type -> HH:MM
+    day_ranges: tuple[tuple[str, date, date], ...] = ()  # (day type, first, last)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -62,7 +68,36 @@ class Settings:
             drift_kwh=float(e.get("EVJ_DRIFT_KWH", "0.5")),
             holidays_country=e.get("EVJ_HOLIDAYS") or None,
             days_off=tuple(d.strip() for d in e.get("EVJ_DAYS_OFF", "").split(",") if d.strip()),
-            departure=e.get("EVJ_DEPARTURE") or None,
+            departure=_hhmm(e.get("EVJ_DEPARTURE") or None),
             reserve_pct=float(e.get("EVJ_RESERVE_PCT", "10")),
             preheat=e.get("EVJ_PREHEAT", "") in ("1", "true", "yes"),
+            timer_step_min=int(e.get("EVJ_TIMER_STEP_MIN", "15")),
+            departures={
+                k[len(DEPARTURE_PREFIX) :].lower(): _hhmm(None if v.lower() == "none" else v)
+                for k, v in e.items()
+                if k.startswith(DEPARTURE_PREFIX) and len(k) > len(DEPARTURE_PREFIX)
+            },
+            day_ranges=_ranges(e.get("EVJ_DAY_TYPES", "")),
         )
+
+
+def _hhmm(v: str | None) -> str | None:
+    """A departure time HH:MM, checked at start-up."""
+    if v is not None:
+        time.fromisoformat(v)
+    return v
+
+
+def _ranges(v: str) -> tuple[tuple[str, date, date], ...]:
+    """Extra day types: "name:YYYY-MM-DD..YYYY-MM-DD,..." (both days included)."""
+    out = []
+    for item in v.split(","):
+        if not item.strip():
+            continue
+        name, _, span = item.strip().partition(":")
+        first, _, last = span.partition("..")
+        a, b = date.fromisoformat(first), date.fromisoformat(last)
+        if not name or a > b:
+            raise ValueError(f"EVJ_DAY_TYPES: bad range {item!r}")
+        out.append((name.lower(), a, b))
+    return tuple(out)

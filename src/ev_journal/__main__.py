@@ -61,7 +61,20 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
         return
     soc = r.home_charge["soc_now"] if r.home_charge else source.last_soc(db, now)
     kpp = r.soc_model.kwh_per_pct if r.soc_model else homecharge.DEFAULT_KWH_PER_PCT
-    r.advice = forecast.plan(r, tz, now, soc, kpp, hols, s.departure, s.reserve_pct, s.preheat)
+    r.advice = forecast.plan(
+        r,
+        tz,
+        now,
+        soc,
+        kpp,
+        hols,
+        s.departure,
+        s.reserve_pct,
+        s.preheat,
+        s.departures,
+        s.day_ranges,
+        s.timer_step_min,
+    )
 
 
 def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: int) -> None:

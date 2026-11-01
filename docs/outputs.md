@@ -139,7 +139,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
                   "min_to_target": 462},
   "advice": {"day": "2026-01-11", "day_type": "weekend", "normal_kwh": 6.6, "bad_kwh": 14.2,
              "soc_now": 40.0, "target": 60, "level": "low", "start": "…", "end": "…",
-             "capped": false, "preheat_off": false, "message": "Утре: …",
+             "departure": null, "capped": false, "preheat_off": false, "message": "Утре: …",
              "score": {"all": {"days": 91, "covered_pct": 92.3, "normal_error_kwh": 3.7}}}
 }
 ```
@@ -147,7 +147,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
 `journeys` holds the last 10, newest first. `month` is the current month.
 
 `advice` is tomorrow's forecast and charging advice ([forecast.md](forecast.md)),
-or `null`. `start` and `end` are local ISO times; `level` is `null` when no
+or `null`. `start`, `end` and `departure` are local ISO times; `level` is `null` when no
 charge is needed. `score` holds the back-test per day type and `all`.
 
 `home_charge` is the SoC estimate of a home charge since the car last came

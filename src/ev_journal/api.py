@@ -46,7 +46,7 @@ class Advice(BaseModel):
     """Tomorrow's energy need and how to charge for it (docs/forecast.md)."""
 
     day: str
-    day_type: Literal["workday", "weekend", "holiday"]
+    day_type: str  # workday, weekend, holiday or an extra type from the settings
     normal_kwh: float
     bad_kwh: float
     soc_now: float
@@ -54,6 +54,7 @@ class Advice(BaseModel):
     level: Literal["low", "mid", "high"] | None
     start: str | None
     end: str | None
+    departure: str | None
     capped: bool
     preheat_off: bool
     message: str
