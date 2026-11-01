@@ -28,6 +28,8 @@ class Settings:
     places_file: Path | None
     tz: str
     interval_sec: int
+    api_host: str
+    api_port: int
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -45,4 +47,6 @@ class Settings:
             places_file=Path(e["EVJ_PLACES_FILE"]) if e.get("EVJ_PLACES_FILE") else None,
             tz=e.get("EVJ_TZ", "UTC"),
             interval_sec=int(e.get("EVJ_INTERVAL_SEC", "900")),
+            api_host=e.get("EVJ_API_HOST", "0.0.0.0"),
+            api_port=int(e.get("EVJ_API_PORT", "8080")),
         )

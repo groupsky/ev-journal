@@ -31,6 +31,7 @@ class Trip:
     km_source: str = ""
     start_place: Place | None = None
     end_place: Place | None = None
+    end_pos: tuple[float, float] | None = None
     fixes: list = field(default_factory=list, repr=False)
 
 
@@ -67,6 +68,8 @@ class Journey:
     trips: list[Trip]
     stops: list[Stop]  # the stops inside the journey (joined)
     label: str = "other"
+    label_by_hand: bool = False
+    not_me: bool = False  # the forecast does not learn from it
 
     @property
     def id(self) -> int:
@@ -180,6 +183,14 @@ class Track:
         return self.fixes[i:k]
 
 
+def _journey_at(journeys: list[Journey], t: int) -> Journey | None:
+    starts = [j.start for j in journeys]
+    i = bisect.bisect_right(starts, t)
+    if i and t <= journeys[i - 1].end:
+        return journeys[i - 1]
+    return None
+
+
 def _overlap(a0: int, a1: int, b0: int, b1: int) -> int:
     return max(0, min(a1, b1) - max(a0, b0))
 
@@ -206,10 +217,13 @@ def build(
     places: list[Place],
     tz: ZoneInfo,
     odometer: list | None = None,
+    labels: list | None = None,
 ) -> Result:
     """Build everything from the sessions, the real GPS fixes and the places.
 
     odometer is a list of (t, km) readings, for the monthly check.
+    labels is a list of (t, label or None, not_me) set by hand, oldest first.
+    A label attaches to the journey that contains its time.
     """
     track = Track(fixes)
     trips = sorted(trips, key=lambda t: t.start)
@@ -227,7 +241,8 @@ def build(
         if first and first[0] - t.start <= MAX_FIX_AGE_MS:
             t.start_place = place_at(places, (first[1], first[2]))
         if last and t.end - last[0] <= MAX_FIX_AGE_MS:
-            t.end_place = place_at(places, (last[1], last[2]))
+            t.end_pos = (last[1], last[2])
+            t.end_place = place_at(places, t.end_pos)
     # A charge is at the place where the last trip before it ended.
     ends = [t.end for t in trips]
     for c in charges:
@@ -259,6 +274,17 @@ def build(
         journeys.append(cur)
     for j in journeys:
         j.label = _label(j, tz)
+    # The newest label row inside a journey wins. A label of None means
+    # "use the computed one".
+    newest = {}
+    for t, label, not_me in labels or []:
+        j = _journey_at(journeys, t)
+        if j is not None:
+            newest[j.id] = (j, label, not_me)
+    for j, label, not_me in newest.values():
+        if label is not None:
+            j.label, j.label_by_hand = label, True
+        j.not_me = not_me
 
     # Outings: from home back to home. An outing not yet home is left out.
     outings: list[Outing] = []
