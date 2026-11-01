@@ -147,6 +147,7 @@ class Month:
     kwh_used: float = 0.0
     kwh_home: float = 0.0
     kwh_away: float = 0.0
+    kwh_unknown: float = 0.0  # charges whose place is not known
     journeys: int = 0
     outings: int = 0
     commute_km: float = 0.0
@@ -281,7 +282,9 @@ def build(
         m.kwh_used += t.kwh or 0
     for c in charges:
         m = month(c.start)
-        if c.place is not None and c.place.kind == "home":
+        if c.place is None:
+            m.kwh_unknown += c.kwh or 0
+        elif c.place.kind == "home":
             m.kwh_home += c.kwh or 0
         else:
             m.kwh_away += c.kwh or 0

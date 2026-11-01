@@ -70,7 +70,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `month` | `YYYY-MM` |
 | `trips`, `journeys`, `outings` | counts, by start time |
 | `km`, `kwh_used` | sum over the trips |
-| `kwh_home`, `kwh_away` | kWh charged, by the place of the charge |
+| `kwh_home`, `kwh_away`, `kwh_unknown` | kWh charged, by the place of the charge (unknown: no place) |
 | `commute_km` | km of commute journeys |
 | `odo_km` | odometer change in the month |
 | `gap_pct` | (`km` − `odo_km`) / `odo_km` × 100 |
@@ -93,7 +93,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
      "charge_min": 0, "charges": 0, "kwh_charged": 0.0}
   ],
   "month": {"month": "2026-01", "km": 624.1, "kwh_used": 36.0, "kwh_home": 23.0,
-            "kwh_away": 40.0, "journeys": 10, "outings": 4, "commute_km": 99.5}
+            "kwh_away": 40.0, "kwh_unknown": 0.0, "journeys": 10, "outings": 4, "commute_km": 99.5}
 }
 ```
 

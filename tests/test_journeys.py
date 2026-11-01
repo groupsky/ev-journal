@@ -139,5 +139,6 @@ def test_trip_without_fixes_has_no_places():
     fixes = [f for f in w.fixes if not t.start <= f[0] <= t.end]
     r = build(w.trips, w.charges, fixes, PLACES, UTC)
     assert r.trips[1].start_place is None and r.trips[1].end_place is None
-    # The home charge after it has no known place either, so it counts as away.
+    # The home charge after it has no known place either.
     assert r.months[0].kwh_home == 3.0
+    assert r.months[0].kwh_unknown == 20.0
