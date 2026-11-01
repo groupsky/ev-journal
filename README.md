@@ -32,19 +32,23 @@ environment points to.
 | `EVJ_TZ` | time zone for months and workdays | `UTC` |
 | `EVJ_INTERVAL_SEC` | seconds between runs | `900` |
 | `EVJ_API_HOST`, `EVJ_API_PORT` | where the [API](docs/api.md) listens | `0.0.0.0`, `8080` |
+| `EVJ_SOC_TARGET` | SoC % a home charge aims for, in the live estimate | `80` |
+| `EVJ_DRIFT_PCT` | drift limit for kWh per % and the meter ratio | `3` |
+| `EVJ_DRIFT_KWH` | drift limit for the overhead per home charge | `0.5` |
 
 ## Run
 
 - `ev-journal` (or `ev-journal loop`): recompute and write every `EVJ_INTERVAL_SEC`.
 - `ev-journal run`: once.
 - `ev-journal dry-run`: read only. Prints counts per month, the GPS km vs
-  odometer gap and the station match counts. Writes nothing to InfluxDB or
-  MQTT, works on a temporary copy of the store, and uses only the cached
-  station feed.
+  odometer gap, the station match counts and the home charge back-test.
+  Writes nothing to InfluxDB or MQTT, works on a temporary copy of the
+  store, and uses only the cached station feed.
 
 Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/api.md).
 Away charges and their price: [docs/charges.md](docs/charges.md). Price of
-trips and months: [docs/price.md](docs/price.md).
+trips and months: [docs/price.md](docs/price.md). SoC during a home charge
+and battery model drift: [docs/home-charge.md](docs/home-charge.md).
 
 ## Develop
 

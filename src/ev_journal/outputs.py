@@ -99,6 +99,10 @@ def influx_lines(r: Result) -> list[str]:
                     "kwh_per_100km": m.kwh_per_100km,
                     "odo_km": m.odo_km,
                     "gap_pct": m.gap_pct,
+                    "kwh_per_pct": m.kwh_per_pct,
+                    "meter_ratio": m.meter_ratio,
+                    "overhead_kwh": m.overhead_kwh,
+                    "drift_flag": m.drift_flag,
                 },
                 m.start,
             )
@@ -153,5 +157,26 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
         "driving_cost_eur": round(m.driving_cost_eur, 2),
         "eur_per_100km": _r(m.eur_per_100km, 2),
         "kwh_per_100km": _r(m.kwh_per_100km, 1),
+        "drift_flag": m.drift_flag,
     }
-    return {"updated": _iso(now), "journeys": last, "month": month}
+    return {
+        "updated": _iso(now),
+        "journeys": last,
+        "month": month,
+        "home_charge": _home_charge(r.home_charge),
+    }
+
+
+def _home_charge(h: dict | None) -> dict | None:
+    if h is None:
+        return None
+    return {
+        "running": h["running"],
+        "since": _iso(h["since"]),
+        "soc_plugin": h["soc_plugin"],
+        "soc_now": round(h["soc_now"], 1),
+        "meter_kwh": round(h["meter_kwh"], 2),
+        "target": h["target"],
+        "meter_kwh_to_target": round(h["meter_kwh_to_target"], 2),
+        "min_to_target": _r(h["min_to_target"], 0),
+    }

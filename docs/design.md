@@ -89,3 +89,4 @@ Business km logs, driver detection, any public view of the data, and live statio
 - [#3](https://github.com/groupsky/ev-journal/issues/3) Journeys and outings from `ioniq_sessions`
 - [#4](https://github.com/groupsky/ev-journal/issues/4) Places, routes, journey labels and command log API
 - [#5](https://github.com/groupsky/ev-journal/issues/5) Price of trips and journeys
+- [#8](https://github.com/groupsky/ev-journal/issues/8) Home charge SoC estimate and battery model drift ([home-charge.md](home-charge.md))
