@@ -175,6 +175,7 @@ def sync(db: sqlite3.Connection, r: Result, places: list[Place], now: int) -> No
     """
     stations = all_stations(db)
     ids = [c.start for c in r.charges]
+    # With no charges at all (an empty read), NOT IN (NULL) deletes nothing, on purpose.
     marks = ",".join("?" * len(ids)) or "NULL"
     db.execute(f"DELETE FROM charges WHERE id NOT IN ({marks})", ids)
     db.execute(

@@ -140,19 +140,21 @@ def dry_run(s: Settings) -> None:
     for name in ("ev-journal.sqlite", "fines-locations.geojson"):
         if (s.data_dir / name).exists():
             shutil.copy2(s.data_dir / name, tmp / name)
-    print(f"station feed: {away(s, r, tmp, _no_fetch)}")
-    db = places.open_store(tmp)
-    rows = db.execute("SELECT id, match FROM charges WHERE at_home = 0 ORDER BY id").fetchall()
-    first = next((cid for cid, how in rows if how in ("ok", "unsure")), None)
-    since = [how for cid, how in rows if first is not None and cid >= first]
-    counts = {k: since.count(k) for k in sorted(set(since))}
-    share = (counts.get("ok", 0) + counts.get("unsure", 0)) / len(since) * 100 if since else 0
-    print(
-        f"away charges: {len(rows)}; since the first matched one: {len(since)}, {counts},"
-        f" matched {share:.0f} %"
-    )
-    db.close()
-    shutil.rmtree(tmp)
+    try:
+        print(f"station feed: {away(s, r, tmp, _no_fetch)}")
+        db = places.open_store(tmp)
+        rows = db.execute("SELECT id, match FROM charges WHERE at_home = 0 ORDER BY id").fetchall()
+        first = next((cid for cid, how in rows if how in ("ok", "unsure")), None)
+        since = [how for cid, how in rows if first is not None and cid >= first]
+        counts = {k: since.count(k) for k in sorted(set(since))}
+        share = (counts.get("ok", 0) + counts.get("unsure", 0)) / len(since) * 100 if since else 0
+        print(
+            f"away charges: {len(rows)}; since the first matched one: {len(since)}, {counts},"
+            f" matched {share:.0f} %"
+        )
+        db.close()
+    finally:
+        shutil.rmtree(tmp)
 
 
 def main() -> None:
