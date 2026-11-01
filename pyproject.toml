@@ -3,7 +3,7 @@ name = "ev-journal"
 version = "0.1.0"
 description = "Trips, journeys and outings from the car data of the home automation stack"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["paho-mqtt>=2,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
