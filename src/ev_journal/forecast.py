@@ -6,7 +6,7 @@ Rules and the numbers behind them: docs/forecast.md.
 import math
 import statistics
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from ev_journal.homecharge import quantile
@@ -95,7 +95,7 @@ def backtest(
     for i in range(days, 0, -1):
         d = last - timedelta(days=i - 1)
         f = forecast(need, d, holidays)
-        if f is not None and d in need:
+        if f is not None:
             f.real_kwh = need[d]
             out.append(f)
     return out
@@ -142,24 +142,31 @@ def advise(
     zone: tuple[datetime, datetime],
     departure: datetime | None,
     reserve_pct: float,
+    now: datetime | None = None,
 ) -> Advice:
     """The lowest level that reaches the target inside the night zone, ending
-    as close to departure as the zone allows."""
+    as close to departure as the zone allows. The charge starts no earlier
+    than now. Sums are in UTC, so the nights the clocks change are right."""
     want = bad_kwh / kwh_per_pct + reserve_pct
     target = min(math.ceil(want / TARGET_STEP) * TARGET_STEP, 100)
     if soc_now >= target:
         return Advice(target=target)
-    z0, z1 = zone
-    end = departure if departure is not None and z0 < departure < z1 else z1
-    window_min = (end - z0).total_seconds() / 60
+    tz = zone[1].tzinfo
+    z0, z1 = (z.astimezone(UTC) for z in zone)
+    if now is not None:
+        z0 = max(z0, now.astimezone(UTC))
+    dep = departure.astimezone(UTC) if departure is not None else None
+    end = dep if dep is not None and z0 < dep < z1 else z1
+    window_min = max((end - z0).total_seconds() / 60, 0)
     for name, _meter_kw, kw in LEVELS:
         minutes = (target - soc_now) * kwh_per_pct / kw * 60
         minutes = math.ceil(minutes / STEP_MIN) * STEP_MIN
         if minutes <= window_min:
-            return Advice(target, name, end - timedelta(minutes=minutes), end)
+            start = end - timedelta(minutes=minutes)
+            return Advice(target, name, start.astimezone(tz), end.astimezone(tz))
     name, _meter_kw, kw = LEVELS[-1]
     reach = math.floor(soc_now + window_min / 60 * kw / kwh_per_pct)
-    return Advice(min(reach, 100), name, z0, end, capped=True)
+    return Advice(min(reach, 100), name, z0.astimezone(tz), end.astimezone(tz), capped=True)
 
 
 def message(f: Forecast, soc_now: float, a: Advice, preheat_off: bool) -> str:
@@ -201,7 +208,11 @@ def plan(
     preheat: bool = False,
 ) -> dict | None:
     """Fill r.forecasts (the scored last days) and return the advice for the
-    next morning: tomorrow in the evening, today after midnight."""
+    next morning: tomorrow in the evening, today after midnight.
+
+    The pool takes the days up to the one before that morning, so in the
+    evening today's trips count. Then the evening forecast is the same as
+    the back-test's forecast for that day."""
     local = datetime.fromtimestamp(now / 1000, tz)
     today = local.date()
     r.forecasts = backtest(daily_need(r, tz, today - timedelta(days=1)), hols)
@@ -214,9 +225,8 @@ def plan(
     dep = None
     if departure and f.day_type == "workday":
         dep = datetime.combine(day, time.fromisoformat(departure), tz)
-    a = advise(
-        soc_now, f.bad_kwh, kwh_per_pct, night_zone(day - timedelta(days=1), tz), dep, reserve_pct
-    )
+    zone = night_zone(day - timedelta(days=1), tz)
+    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local)
     preheat_off = preheat and f.day_type == "holiday"
     return {
         "day": day.isoformat(),

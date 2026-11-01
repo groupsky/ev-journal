@@ -54,7 +54,11 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
     """Tomorrow's forecast and charging advice (#9)."""
     tz, now = ZoneInfo(s.tz), int(time.time() * 1000)
     y = time.gmtime().tm_year
-    hols = forecast.holiday_set(s.holidays_country, s.days_off, range(y - 2, y + 2))
+    try:
+        hols = forecast.holiday_set(s.holidays_country, s.days_off, range(y - 2, y + 2))
+    except (ValueError, NotImplementedError) as e:  # a bad EVJ_HOLIDAYS or EVJ_DAYS_OFF
+        print(f"ev-journal: no advice: {e!r}", file=sys.stderr)
+        return
     soc = r.home_charge["soc_now"] if r.home_charge else source.last_soc(db, now)
     kpp = r.soc_model.kwh_per_pct if r.soc_model else homecharge.DEFAULT_KWH_PER_PCT
     r.advice = forecast.plan(r, tz, now, soc, kpp, hols, s.departure, s.reserve_pct, s.preheat)

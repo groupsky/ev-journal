@@ -7,6 +7,10 @@ the forecast for the next morning and says how to charge for it. The goal is
 ## The next morning
 
 Tomorrow in the evening, today after midnight: the local date 12 h from now.
+The pool takes the days up to the one before that morning. So in the
+evening today's trips count, and the evening forecast is the same as the
+back-test's forecast for that day. A run during the day counts today's trips
+so far; only the evening one matters.
 
 ## Day types
 
@@ -68,7 +72,8 @@ Left out for now:
 - **Night tariff zone**: 22:00–06:00 from 1 November to 31 March,
   23:00–07:00 from 1 April to 31 October, by the date of the evening.
 - **The charge ends** at the end of the zone, or at the departure when that
-  falls inside the zone. The departure (`EVJ_DEPARTURE`, `HH:MM`) is used on
+  falls inside the zone. The charge starts no earlier than now. Times are
+  summed in real time, so the nights the clocks change are right. The departure (`EVJ_DEPARTURE`, `HH:MM`) is used on
   workdays only.
 - **Level**: the lowest of the car's three AC levels that reaches the target
   in time. Battery side 0.92 / 1.60 / 2.34 kW (low / mid / high; 1.22 /

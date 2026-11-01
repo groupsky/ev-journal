@@ -7,7 +7,7 @@ dependencies = [
   "paho-mqtt>=2,<3",
   "fastapi>=0.115,<1",
   "uvicorn>=0.30,<1",
-  "holidays>=0.50",
+  "holidays>=0.50,<1",
 ]
 
 [project.optional-dependencies]

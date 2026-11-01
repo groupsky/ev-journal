@@ -155,3 +155,38 @@ def test_api(client, advice):
     assert got.status_code == 200
     assert got.json()["level"] == "low"
     assert got.json()["score"]["all"]["days"] == len(r.forecasts)
+
+
+DST = ZoneInfo("Europe/Lisbon")  # any zone with EU summer time
+
+
+def real_h(a):
+    """Real hours between start and end (same-zone subtraction uses clock time)."""
+    return (a.end.astimezone(UTC) - a.start.astimezone(UTC)).total_seconds() / 3600
+
+
+def test_the_nights_the_clocks_change():
+    # 2026-03-28/29: the zone is 7 real hours.
+    z = night_zone(date(2026, 3, 28), DST)
+    a = advise(20, 9.0, KPP, z, None, 10)  # wants 40 %
+    assert a.level == "low"  # 6.52 h → 6.75 h fits in 7 h
+    assert real_h(a) == 6.75
+    assert a.start.hour == 22 and a.start.minute == 15
+    a = advise(10, 27.0, KPP, z, None, 10)
+    assert a.capped and a.target == 10 + int(7 * 2.34 / KPP)  # 64 %, not 72 %
+    # 2026-10-24/25: 9 real hours.
+    z = night_zone(date(2026, 10, 24), DST)
+    a = advise(20, 9.0, KPP, z, None, 15)  # wants 45 %: 25 % = 7.5 kWh, 8.15 h at low
+    assert a.level == "low" and a.start.utcoffset() != a.end.utcoffset()
+    assert real_h(a) == 8.25
+
+
+def test_departure_after_the_zone_ends():
+    a = advise(20, 6.0, KPP, WINTER, at(date(2026, 1, 13), 8), 10)
+    assert a.end == WINTER[1]
+
+
+def test_after_midnight_the_start_is_not_in_the_past():
+    now = at(date(2026, 1, 13), 3)
+    a = advise(20, 6.0, KPP, WINTER, None, 10, now)  # 3.5 h at low does not fit in 3 h
+    assert a.level == "mid" and a.start >= now
