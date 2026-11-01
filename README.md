@@ -43,7 +43,8 @@ environment points to.
   station feed.
 
 Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/api.md).
-Away charges and their price: [docs/charges.md](docs/charges.md).
+Away charges and their price: [docs/charges.md](docs/charges.md). Price of
+trips and months: [docs/price.md](docs/price.md).
 
 ## Develop
 

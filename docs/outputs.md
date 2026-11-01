@@ -42,6 +42,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `waiting_sec`, `waiting_kwh` | from homy, when it gives them |
 | `start_place`, `end_place` | place ids, when known |
 | `estimated` | `true` when homy says `start_check = filled` |
+| `cost_eur`, `price_eur_per_kwh`, `price_estimated`, `unknown_share` | the price ([price.md](price.md)) |
 
 ### `ev_journeys` — one row per journey, at its start (the journey id)
 
@@ -57,6 +58,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `kwh_charged` | kWh into the battery on the way |
 | `trips` | number of trips |
 | `label` | `commute` or `other` |
+| `cost_eur`, `price_estimated` | the price ([price.md](price.md)) |
 | `label_by_hand` | `true` when the label was set through the API |
 | `not_me` | `true` when marked "not me" through the API |
 | `start_place`, `end_place` | place ids, when known |
@@ -74,6 +76,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `km`, `kwh_used` | sum over the trips |
 | `kwh_home`, `kwh_away`, `kwh_unknown` | kWh charged, by the place of the charge (unknown: no place) |
 | `commute_km` | km of commute journeys |
+| `spent_eur`, `driving_cost_eur`, `drain_kwh`, `eur_per_100km`, `kwh_per_100km` | the price ([price.md](price.md)) |
 | `odo_km` | odometer change in the month |
 | `gap_pct` | (`km` − `odo_km`) / `odo_km` × 100 |
 
@@ -114,10 +117,12 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "journeys": [
     {"id": 1768039200000, "start": "…Z", "end": "…Z", "from": "Test Home", "to": "Test Work",
      "label": "other", "not_me": false, "km": 25.0, "kwh_used": 3.0, "drive_min": 30, "waiting_min": 0,
-     "charge_min": 0, "charges": 0, "kwh_charged": 0.0}
+     "charge_min": 0, "charges": 0, "kwh_charged": 0.0, "cost_eur": null}
   ],
   "month": {"month": "2026-01", "km": 624.1, "kwh_used": 36.0, "kwh_home": 23.0,
-            "kwh_away": 40.0, "kwh_unknown": 0.0, "journeys": 10, "outings": 4, "commute_km": 99.5}
+            "kwh_away": 40.0, "kwh_unknown": 0.0, "journeys": 10, "outings": 4, "commute_km": 99.5,
+            "spent_eur": 0.0, "driving_cost_eur": 0.0, "eur_per_100km": null,
+            "kwh_per_100km": 5.8}
 }
 ```
 

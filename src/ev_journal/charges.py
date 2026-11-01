@@ -280,3 +280,15 @@ def price(db: sqlite3.Connection, charge_id: int) -> None:
         " cost_eur = ? WHERE id = ?",
         (network, per_kwh, source, cost, charge_id),
     )
+
+
+def known_costs(db: sqlite3.Connection) -> dict[int, float]:
+    """The money paid for away charges with a receipt or an answer, by charge start.
+
+    Estimates are not money paid: they stay unknown for the pool.
+    """
+    rows = db.execute(
+        "SELECT id, cost_eur FROM charges WHERE at_home = 0"
+        " AND price_source IN ('receipt', 'answer') AND cost_eur IS NOT NULL"
+    )
+    return {r[0]: r[1] for r in rows}
