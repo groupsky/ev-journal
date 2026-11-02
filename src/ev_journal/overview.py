@@ -17,15 +17,14 @@ def _div(a: float, b: float, k: float = 1.0) -> float | None:
 def stats(charges: list[Charge], trips: list[Trip]) -> dict:
     """The numbers of one period. None where the period has no data for it.
 
-    Price per kWh: money paid ÷ kWh into the battery, over the charges with a
-    known cost. Per 100 km: the priced trips (the pool price, docs/price.md).
-    kWh per 100 km: all trips with km and kWh.
+    The same rules as the month (journeys.build, price.apply): price per kWh
+    over the charges with a known cost; per 100 km over the priced trips; kWh
+    per 100 km over all trips. A missing km or kWh counts as 0.
     """
     paid = [c for c in charges if c.kwh and c.cost_eur is not None]
     home = [c for c in paid if c.home_cost]
     away = [c for c in paid if not c.home_cost]
-    priced = [t for t in trips if t.cost_eur is not None and t.km]
-    used = [t for t in trips if t.kwh is not None and t.km]
+    priced = [t for t in trips if t.cost_eur is not None]
 
     def per_kwh(cs: list[Charge]) -> float | None:
         return _div(sum(c.cost_eur for c in cs), sum(c.kwh for c in cs))
@@ -34,8 +33,8 @@ def stats(charges: list[Charge], trips: list[Trip]) -> dict:
         "eur_per_kwh": per_kwh(paid),
         "eur_per_kwh_home": per_kwh(home),
         "eur_per_kwh_away": per_kwh(away),
-        "eur_per_100km": _div(sum(t.cost_eur for t in priced), sum(t.km for t in priced), 100),
-        "kwh_per_100km": _div(sum(t.kwh for t in used), sum(t.km for t in used), 100),
+        "eur_per_100km": _div(sum(t.cost_eur for t in priced), sum(t.km or 0 for t in priced), 100),
+        "kwh_per_100km": _div(sum(t.kwh or 0 for t in trips), sum(t.km or 0 for t in trips), 100),
         "charges_no_cost": sum(1 for c in charges if c.kwh and c.cost_eur is None),
         "trips_no_price": len(trips) - len(priced),
     }

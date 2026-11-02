@@ -2,6 +2,7 @@ import pytest
 from test_price import DAY, T0, UTC, worked_example
 
 from ev_journal import outputs
+from ev_journal.journeys import Trip, build
 from ev_journal.overview import overview
 
 
@@ -58,3 +59,14 @@ def test_month_and_summary():
     assert s["overview"]["last_30d"]["charges_no_cost"] == 0
     lines = [ln for ln in outputs.influx_lines(r) if ln.startswith("ev_month ")]
     assert any("eur_per_kwh_home=0.2" in ln for ln in lines)
+
+
+def test_overview_matches_month():
+    # A trip without kWh still counts its km, as in the month.
+    trips = [
+        Trip(start=T0, end=T0 + 3_600_000, kwh=None, km_homy=100.0),
+        Trip(start=T0 + DAY, end=T0 + DAY + 3_600_000, kwh=20.0, km_homy=100.0),
+    ]
+    r = build(trips, [], [], [], UTC)
+    assert r.months[0].kwh_per_100km == pytest.approx(10.0)
+    assert overview(r, T0 + 10 * DAY)["all"]["kwh_per_100km"] == pytest.approx(10.0)

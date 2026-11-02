@@ -59,8 +59,10 @@ holds `all` and `last_30d`.
   known cost. `eur_per_kwh_home` and `eur_per_kwh_away` split it: home is a
   cost from the house meter, away is a receipt or an answer.
 - `eur_per_100km`: the cost of the priced trips ÷ their km × 100.
-- `kwh_per_100km`: net battery kWh ÷ km × 100, over all trips with both.
-  With the price per kWh, it tells price and consumption apart.
+- `kwh_per_100km`: net battery kWh ÷ km × 100, over all trips. With the
+  price per kWh, it tells price and consumption apart.
+
+All periods use the same rules; a trip without km or kWh counts as 0 there.
 - `charges_no_cost`, `trips_no_price` (MQTT only): what was left out.
 
 Per 100 km is not split into home and away: a trip takes energy from the
