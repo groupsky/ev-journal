@@ -98,6 +98,10 @@ def apply(r: Result, costs: dict[int, float], home: set[int], tz: ZoneInfo) -> f
             c.home_cost = c.start in home
             if c.cost_eur is not None and (m := month(c.start)):
                 m.spent_eur += c.cost_eur
+                if c.kwh:
+                    p = m.paid.setdefault("home" if c.home_cost else "away", [0.0, 0.0])
+                    p[0] += c.kwh
+                    p[1] += c.cost_eur
             if not c.kwh:
                 continue
             if c.cost_eur is not None:
