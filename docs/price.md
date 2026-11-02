@@ -61,9 +61,9 @@ holds `all` and `last_30d`.
 - `eur_per_100km`: the cost of the priced trips ÷ their km × 100.
 - `kwh_per_100km`: net battery kWh ÷ km × 100, over all trips. With the
   price per kWh, it tells price and consumption apart.
+- `charges_no_cost`, `trips_no_price` (MQTT only): what was left out.
 
 All periods use the same rules; a trip without km or kWh counts as 0 there.
-- `charges_no_cost`, `trips_no_price` (MQTT only): what was left out.
 
 Per 100 km is not split into home and away: a trip takes energy from the
 pool, which mixes both.
