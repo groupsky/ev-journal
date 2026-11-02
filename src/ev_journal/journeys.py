@@ -182,6 +182,7 @@ class Month:
     priced_km: float = 0.0
     priced_kwh: float = 0.0
     drain_kwh: float = 0.0  # lost while parked, seen at each charge
+    paid: dict = field(default_factory=dict)  # "home"/"away" -> [kWh, EUR] of charges with a cost
     # filled by homecharge.drift()
     kwh_per_pct: float | None = None
     meter_ratio: float | None = None
@@ -195,6 +196,12 @@ class Month:
     @property
     def kwh_per_100km(self) -> float | None:
         return self.kwh_used / self.km * 100 if self.km else None
+
+    def eur_per_kwh(self, where: str | None = None) -> float | None:
+        """Money paid ÷ kWh into the battery, over the charges with a known cost."""
+        ps = [v for k, v in self.paid.items() if where in (None, k)]
+        kwh = sum(p[0] for p in ps)
+        return sum(p[1] for p in ps) / kwh if kwh else None
 
     @property
     def gap_pct(self) -> float | None:

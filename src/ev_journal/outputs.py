@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from ev_journal.geo import thin
 from ev_journal.influx import line
 from ev_journal.journeys import Month, Result
+from ev_journal.overview import overview
 
 TRACK_STEP_M = 50.0
 
@@ -111,6 +112,9 @@ def influx_lines(r: Result) -> list[str]:
                     "drain_kwh": m.drain_kwh,
                     "eur_per_100km": m.eur_per_100km,
                     "kwh_per_100km": m.kwh_per_100km,
+                    "eur_per_kwh": m.eur_per_kwh(),
+                    "eur_per_kwh_home": m.eur_per_kwh("home"),
+                    "eur_per_kwh_away": m.eur_per_kwh("away"),
                     "odo_km": m.odo_km,
                     "gap_pct": m.gap_pct,
                     "kwh_per_pct": m.kwh_per_pct,
@@ -171,15 +175,25 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
         "driving_cost_eur": round(m.driving_cost_eur, 2),
         "eur_per_100km": _r(m.eur_per_100km, 2),
         "kwh_per_100km": _r(m.kwh_per_100km, 1),
+        "eur_per_kwh": _r(m.eur_per_kwh(), 3),
+        "eur_per_kwh_home": _r(m.eur_per_kwh("home"), 3),
+        "eur_per_kwh_away": _r(m.eur_per_kwh("away"), 3),
         "drift_flag": m.drift_flag,
     }
     return {
         "updated": _iso(now),
         "journeys": last,
         "month": month,
+        "overview": {p: _rounded(v) for p, v in overview(r, now).items()},
         "home_charge": _home_charge(r.home_charge),
         "advice": r.advice,
     }
+
+
+def _rounded(st: dict) -> dict:
+    """Prices to 3 decimals, per 100 km to 2 and 1; counts stay as they are."""
+    n = {"eur_per_100km": 2, "kwh_per_100km": 1}
+    return {k: v if isinstance(v, int) else _r(v, n.get(k, 3)) for k, v in st.items()}
 
 
 def _home_charge(h: dict | None) -> dict | None:
