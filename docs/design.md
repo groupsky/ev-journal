@@ -70,7 +70,7 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
 - The store (places, routes, labels, prices, answers, commands) is **one SQLite file** in a volume. Everything else is derived and recomputed.
 - Outputs:
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
-  - A retained MQTT summary (the last 10 journeys and the month) for a Home Assistant view in homy.
+  - A retained MQTT summary (the last 10 journeys, the month, and cost per kWh and per 100 km for all time and the last 30 days) for a Home Assistant view in homy.
 
 ## Later
 

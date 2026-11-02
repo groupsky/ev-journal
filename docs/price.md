@@ -43,8 +43,38 @@ everything.
 - `ev_month`: `spent_eur` (charges with a known cost), `driving_cost_eur`
   (the priced trips), `drain_kwh`, `eur_per_100km` (driving cost ÷ the km of
   the priced trips), `kwh_per_100km` (all trips).
+- `ev_month`: also `eur_per_kwh`, `eur_per_kwh_home`, `eur_per_kwh_away`
+  ([Overview](#overview)).
 - MQTT `month`: `spent_eur`, `driving_cost_eur`, `eur_per_100km`,
-  `kwh_per_100km`. Each journey: `cost_eur`.
+  `kwh_per_100km`, `eur_per_kwh`, `eur_per_kwh_home`, `eur_per_kwh_away`.
+  MQTT `overview`: [Overview](#overview). Each journey: `cost_eur`.
+
+## Overview
+
+Cost per kWh and per 100 km, for all time, the last 30 days (by start time,
+up to the run) and each month (`ev_month` and MQTT `month`). MQTT `overview`
+holds `all` and `last_30d`.
+
+- `eur_per_kwh`: money paid ÷ kWh into the battery, over the charges with a
+  known cost. `eur_per_kwh_home` and `eur_per_kwh_away` split it: home is a
+  cost from the house meter, away is a receipt or an answer.
+- `eur_per_100km`: the cost of the priced trips ÷ their km × 100.
+- `kwh_per_100km`: net battery kWh ÷ km × 100, over all trips with both.
+  With the price per kWh, it tells price and consumption apart.
+- `charges_no_cost`, `trips_no_price` (MQTT only): what was left out.
+
+Per 100 km is not split into home and away: a trip takes energy from the
+pool, which mixes both.
+
+**No data, so no number.** A value is `null` when its period has nothing
+to count; nothing is guessed:
+
+- Months without `cost_eur` in `ioniq_charges` (older home prices) have no
+  home price per kWh. Their trips often have no price either, so per 100 km
+  is missing or counts only some trips (`trips_no_price`).
+- An away charge without a receipt or an answer is left out of the price
+  per kWh (`charges_no_cost`).
+- A month with no away charge has no away price.
 
 Spent and driving cost differ by the change in what the battery holds, by
 the drain, and by trips with no price.
