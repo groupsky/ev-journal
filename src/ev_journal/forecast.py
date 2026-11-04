@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from ev_journal import calendar_keys as ck
 from ev_journal.homecharge import quantile
 from ev_journal.journeys import Result
 
@@ -71,19 +72,39 @@ class Forecast:
     bad_kwh: float  # p90 + margin
     real_kwh: float | None = None
     start: int = 0  # the day's first ms, local time
+    choice: tuple[str, ...] = ()  # the calendar keys of the pool
 
 
-def forecast(need: dict[date, float], day: date, holidays: set[date]) -> Forecast | None:
-    """From the days of the same kind in the 28 days before day."""
-    dtype = day_type(day, holidays)
-    pool = [
-        v
-        for d, v in need.items()
-        if day - timedelta(days=POOL_DAYS) <= d < day and kind(day_type(d, holidays)) == kind(dtype)
-    ]
-    if len(pool) < MIN_POOL:
-        return None
-    return Forecast(day, dtype, quantile(pool, 0.5), quantile(pool, 0.9) + BAD_MARGIN_KWH)
+def chain(choice: tuple[str, ...], dtype: str) -> list[tuple[str, ...]]:
+    """The choices to try, simplest last: a pair, then its first key, then no
+    key. A day of a named range tries the past days of the same name first."""
+    out = [choice[:i] for i in range(len(choice), -1, -1)]
+    if kind(dtype) == "workday" and dtype != "workday":
+        out.insert(0, ("day_type",))
+    return out
+
+
+def forecast(
+    need: dict[date, float], day: date, holidays: set[date], ranges=(), choices=None
+) -> Forecast | None:
+    """From the past days of the same kind and the same calendar keys.
+
+    choices: the keys per kind ("workday", "off"); none: the 28 days before.
+    A pool with fewer than MIN_POOL days falls back to the next simpler choice."""
+    dtype = day_type(day, holidays, ranges)
+    for choice in chain((choices or {}).get(kind(dtype), ()), dtype):
+        first = day - timedelta(days=ck.window(choice, POOL_DAYS))
+        v = ck.value(choice, day, dtype)
+        pool = []
+        for d, x in need.items():
+            if first <= d < day:
+                t = day_type(d, holidays, ranges)
+                if kind(t) == kind(dtype) and ck.value(choice, d, t) == v:
+                    pool.append(x)
+        if len(pool) >= MIN_POOL:
+            normal, bad = quantile(pool, 0.5), quantile(pool, 0.9) + BAD_MARGIN_KWH
+            return Forecast(day, dtype, normal, bad, choice=choice)
+    return None
 
 
 def day_start(d: date, tz: ZoneInfo) -> int:
@@ -91,16 +112,24 @@ def day_start(d: date, tz: ZoneInfo) -> int:
 
 
 def backtest(
-    need: dict[date, float], holidays: set[date], days: int = SCORE_DAYS
+    need: dict[date, float],
+    holidays: set[date],
+    days: int = SCORE_DAYS,
+    ranges=(),
+    choices=None,
+    only: str | None = None,
 ) -> list[Forecast]:
-    """The forecast of each of the last days, made only from the days before it."""
+    """The forecast of each of the last days, made only from the days before it.
+    only: a kind, to forecast only the days of that kind."""
     if not need:
         return []
     last = max(need)
     out = []
     for i in range(days, 0, -1):
         d = last - timedelta(days=i - 1)
-        f = forecast(need, d, holidays)
+        if only and kind(day_type(d, holidays, ranges)) != only:
+            continue
+        f = forecast(need, d, holidays, ranges, choices)
         if f is not None:
             f.real_kwh = need[d]
             out.append(f)
@@ -108,10 +137,11 @@ def backtest(
 
 
 def score(fs: list[Forecast]) -> dict[str, dict]:
-    """Per day type: days, share covered by the bad day, mean error of the normal day."""
+    """Per day type: days, share covered by the bad day, mean error of the
+    normal day. The days of named ranges count as workdays."""
     out = {}
     for dtype in ("workday", "weekend", "holiday", "all"):
-        g = [f for f in fs if dtype in ("all", f.day_type)]
+        g = [f for f in fs if dtype in ("all", f.day_type) or dtype == kind(f.day_type)]
         if g:
             out[dtype] = {
                 "days": len(g),
@@ -119,6 +149,49 @@ def score(fs: list[Forecast]) -> dict[str, dict]:
                 "normal_error_kwh": statistics.fmean(abs(f.normal_kwh - f.real_kwh) for f in g),
             }
     return out
+
+
+def beats(s: dict, base: dict) -> bool:
+    """Bad-day coverage not lower, and normal-day error lower."""
+    return (
+        s["covered_pct"] >= base["covered_pct"]
+        and s["normal_error_kwh"] < base["normal_error_kwh"] - 1e-9
+    )
+
+
+def pick(
+    need: dict[date, float], holidays: set[date], ranges=(), days: int = SCORE_DAYS
+) -> tuple[dict[str, tuple[str, ...]], list[dict]]:
+    """Per kind, the simplest choice of calendar keys that beats no key in the
+    back-test: the single key with the lowest error among those that beat
+    it; else the pair of the two single keys with the lowest error, if it
+    beats it; else no key. Returns the picks and a row for each tried choice."""
+    picks, rows = {}, []
+    for k in ("workday", "off"):
+        base_fs = backtest(need, holidays, days, ranges, only=k)
+        if not base_fs:
+            continue
+        base_days = {f.day for f in base_fs}
+
+        def run(choice, k=k, base_days=base_days):
+            fs = backtest(need, holidays, days, ranges, {k: choice}, only=k)
+            # Only the days that no key scores, so all choices compare alike.
+            fs = [f for f in fs if f.day in base_days]
+            s = score(fs)["all"]
+            rows.append({"kind": k, "choice": choice, **s, "picked": False})
+            return rows[-1]
+
+        base = run(())
+        singles = sorted((run((key,)) for key in ck.KEYS), key=lambda r: r["normal_error_kwh"])
+        best = next((r for r in singles if beats(r, base)), None)
+        if best is None:
+            pair = run(singles[0]["choice"] + singles[1]["choice"])
+            if beats(pair, base):
+                best = pair
+        best = best or base
+        best["picked"] = True
+        picks[k] = best["choice"]
+    return picks, rows
 
 
 def night_zone(evening: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
@@ -225,14 +298,16 @@ def plan(
     the back-test's forecast for that day."""
     local = datetime.fromtimestamp(now / 1000, tz)
     today = local.date()
-    r.forecasts = backtest(daily_need(r, tz, today - timedelta(days=1)), hols)
+    past = daily_need(r, tz, today - timedelta(days=1))
+    picks, r.forecast_tries = pick(past, hols, ranges)
+    r.forecasts = backtest(past, hols, ranges=ranges, choices=picks)
     for f in r.forecasts:
         f.start = day_start(f.day, tz)
     day = (local + timedelta(hours=12)).date()
-    f = forecast(daily_need(r, tz, min(day - timedelta(days=1), today)), day, hols)
+    need = daily_need(r, tz, min(day - timedelta(days=1), today))
+    f = forecast(need, day, hols, ranges, picks)
     if f is None or soc_now is None:
         return None
-    f.day_type = day_type(day, hols, ranges)
     # The departure of the day type; else the default. None: the zone end.
     hhmm = (departures or {}).get(f.day_type, departure)
     dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None

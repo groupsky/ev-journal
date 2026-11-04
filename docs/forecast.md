@@ -21,27 +21,64 @@ so far; only the evening one matters.
 - `workday`: the rest.
 - Extra types: `EVJ_DAY_TYPES` names date ranges, for example
   `alt:2026-01-05..2026-01-09`. A workday inside a range gets that name.
-  Weekends and holidays keep theirs. An extra type only changes the
-  departure; for the forecast it is a workday.
+  Weekends and holidays keep theirs, so a range that covers a weekend
+  changes only its workdays (weekend shifts are not covered yet). An extra
+  type sets the departure and has its own pool (below).
 
-Workdays form one pool. Weekends and holidays form the other ("off" days):
-there are too few holidays to learn from alone.
+There are two kinds of day. Workdays (extra types too) are one kind.
+Weekends and holidays are the other ("off" days): there are too few
+holidays to learn from alone.
 
 ## Forecast
 
 - The **need** of a day is the battery kWh of all trips that start on it
   (local time). Journeys marked "not me" are left out. A day without trips
   counts as 0.
-- From the days of the same pool in the 28 days before:
+- From the days of the same kind in the 28 days before:
   **normal day** = p50, **bad day** = p90 + 2 kWh (linear interpolation; at
-  least 3 days).
+  least 3 days). This is the base rule ("no key").
+- **Calendar keys** ([#23](https://github.com/groupsky/ev-journal/issues/23))
+  can narrow the pool to past days with the same value. Each key looks back
+  further, so it still finds enough days:
+
+  | key | value | looks back |
+  |---|---|---|
+  | `weekday` | Monday … Sunday | 84 days |
+  | `iso_week_parity` | odd or even ISO week | 56 days |
+  | `month_parity` | odd or even month | 122 days |
+  | `month_part` | days 1–10, 11–20, 21–31 | 91 days |
+  | `month` | the month of the year | 365 days |
+  | `day_type` | workday, weekend, holiday or an extra type | 365 days |
+
+  A pair of keys looks back as far as its longer key. The keys are in
+  `calendar_keys.py`, apart from the pool code, so a later forecast can
+  reuse them.
+- **The back-test picks the keys**, for each kind on its own, at every
+  run. It tries no key and each key alone. A choice *beats* no key when its
+  bad-day coverage is not lower and its normal-day error is lower; all are
+  scored on the days that no key scores. The pick is the single key with
+  the lowest error among those that beat no key. When none does, it tries
+  the pair of the two single keys with the lowest error, and picks it if it
+  beats no key. Else no key. So a key is used only when it beats the base
+  rule on the real data.
+- **Fallback.** A pool with fewer than 3 days falls back to the next
+  simpler choice: a pair to its first key, then to no key.
+- **Extra types.** A day of an extra type (`EVJ_DAY_TYPES`) first pools from
+  past days of the same name in the last 365 days. Fill in past periods too,
+  so it has days to learn from. With fewer than 3 such days it falls back
+  to the picked choice of workdays. This is not part of the pick: a named
+  range is the owner's statement that those days differ. In the back-test,
+  every choice (no key too) pools named days this way.
 - Standby drain is left out. It is about 0.2 kWh a day, well under the
   margin, and the trips do not include it.
 
 ### Back-test
 
-Each of the last 91 days is forecast only from the days before it.
-`ev-journal dry-run` prints it; `ev_forecast` keeps it per day. On real data
+Each of the last 91 days is forecast only from the days before it, with
+the picked keys. `ev-journal dry-run` prints it, and then each tried choice
+per kind (days, bad-day coverage, normal-day error) and which one was
+picked. `ev_forecast` keeps it per day. The picking uses the same 91 days
+it is scored on. The table below is from before the keys. On real data
 to 2026-10-31 (91 days):
 
 | N days | quantile | margin | bad day covers | mean over-forecast |
