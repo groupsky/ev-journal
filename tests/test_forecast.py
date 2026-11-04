@@ -1,3 +1,5 @@
+import random
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -301,3 +303,114 @@ def test_dry_run_prints_every_tried_choice(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     assert "workday no key" in out and "weekday" in out and "month_part" in out
     assert out.count("<- picked") == 2
+
+
+def noisy_need(plant, seed: int = 1, days: int = 730) -> dict[date, float]:
+    """Workdays 8 kWh, off days 2, plus noise, plus plant(day) kWh."""
+    rnd = random.Random(seed)
+    d0 = date(2025, 1, 6)
+    need = {}
+    for i in range(days):
+        d = d0 + timedelta(days=i)
+        x = (2.0 if d.weekday() >= 5 else 8.0) + rnd.gauss(0, 1.5) + plant(d)
+        need[d] = max(x, 0.0)
+    return need
+
+
+def base_of(need):
+    return backtest(need, set(), days=len(need))
+
+
+@pytest.mark.parametrize(
+    "plant, family",
+    [
+        (lambda d: 3.0 if d.month % 2 else 0.0, {"month_mod2", "month"}),
+        (lambda d: 4.0 if d.day == 5 else 0.0, {"day_of_month"}),
+        (lambda d: 4.0 if (d.day - 1) // 7 == 0 and d.weekday() == 1 else 0.0, {"nth_weekday"}),
+    ],
+)
+def test_a_planted_rhythm_is_found(plant, family):
+    keys, rows = forecast.select(base_of(noisy_need(plant)))
+    assert keys and keys[0] in family
+    assert rows[-1]["normal_error_kwh"] < rows[0]["normal_error_kwh"]
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_pure_noise_picks_no_key(seed):
+    keys, rows = forecast.select(base_of(noisy_need(lambda d: 0.0, seed)))
+    assert keys == () and len(rows) == 1
+
+
+def test_effects_shrink_and_need_a_count():
+    m = forecast.Effects(("weekday",))
+    assert m.effect([3.0] * (forecast.MIN_COUNT - 1)) == 0.0
+    n = forecast.MIN_COUNT
+    assert m.effect([3.0] * n) == pytest.approx(3.0 * n / (n + forecast.SHRINK))
+
+
+def test_a_day_uses_only_the_days_before_it():
+    base = base_of(noisy_need(lambda d: 4.0 if d.day == 5 else 0.0))
+    fs, _m = forecast.walk(base, ("day_of_month",))
+    day = fs[400].day
+    # From that day on, every 5th needs 6 kWh more: the forecasts up to
+    # that day stay the same, the later ones learn it.
+    later = [
+        replace(f, real_kwh=f.real_kwh + 6.0) if f.day >= day and f.day.day == 5 else f
+        for f in base
+    ]
+    fs2, _m = forecast.walk(later, ("day_of_month",))
+    assert [f for f in fs if f.day <= day] == [f for f in fs2 if f.day <= day]
+    assert fs[-1].day.day == 5 and fs[-1].effect_kwh < fs2[-1].effect_kwh
+
+
+def result_of(need: dict[date, float]) -> Result:
+    trips = [
+        Trip(start=int(at(d, 8).timestamp() * 1000), end=int(at(d, 9).timestamp() * 1000), kwh=x)
+        for d, x in need.items()
+    ]
+    return Result(trips=trips, journeys=[], outings=[], months=[])
+
+
+def test_plan_uses_the_effects_only_when_they_win(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+
+    fifth = noisy_need(lambda d: 4.0 if d.day == 5 else 0.0, days=760)  # to 2027-02-04
+    now = int(at(date(2027, 2, 4), 20).timestamp() * 1000)  # evening before the 5th
+    r = result_of(fifth)
+    a = plan(r, UTC, now, 50.0, KPP, set())
+    assert r.forecast_effects["keys"] == ("day_of_month",)
+    [e] = a["effects"]
+    assert (e["key"], e["value"]) == ("day_of_month", 5) and e["effect_kwh"] > 1.0
+    assert any(f.effect_kwh for f in r.forecasts)
+    r.trips = []  # dry-run's month table needs months; not part of this test
+    monkeypatch.setattr(cli, "compute", lambda s: r)
+    monkeypatch.setattr(cli, "away", lambda *a: "-")
+    cli.dry_run(SimpleNamespace(data_dir=tmp_path))
+    out = capsys.readouterr().out
+    assert "today's rule" in out and "day_of_month  " in out and "<- used" in out
+    assert "day_of_month = 5 (workday): +" in out
+    # Pure noise: today's rule stays, the same forecast as without the model.
+    r = result_of(noisy_need(lambda d: 0.0, days=760))
+    a = plan(r, UTC, now, 50.0, KPP, set())
+    assert r.forecast_effects["keys"] == () and a["effects"] == []
+    assert not any(f.effect_kwh for f in r.forecasts)
+
+
+def test_the_evening_forecast_learns_today(monkeypatch):
+    # In the evening, today is learned too: the forecast for tomorrow is the
+    # one the next day's back-test gives for that day. Every third week
+    # needs 3 kWh more; no key of #23 catches it.
+    third = noisy_need(lambda d: 3.0 if (d.toordinal() - 1) // 7 % 3 == 0 else 0.0, days=760)
+    need = {d: x for d, x in third.items() if d < date(2027, 1, 22)}  # to Thursday 21st
+    seen = []
+    real = forecast.shifted
+    monkeypatch.setattr(forecast, "shifted", lambda f, e: seen.append(e) or real(f, e))
+    plan(result_of(need), UTC, int(at(date(2027, 1, 20), 20).timestamp() * 1000), 50.0, KPP, set())
+    evening = seen[-1]  # the forecast for Thursday 21st, made on Wednesday evening
+    r = result_of(need)
+    plan(r, UTC, int(at(date(2027, 1, 22), 20).timestamp() * 1000), 50.0, KPP, set())
+    assert r.forecast_effects["keys"][0] == "week_mod3"
+    [f] = [f for f in r.forecasts if f.day == date(2027, 1, 21)]
+    assert f.effect_kwh != 0.0 and evening == f.effect_kwh

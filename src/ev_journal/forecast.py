@@ -3,6 +3,7 @@
 Rules and the numbers behind them: docs/forecast.md.
 """
 
+import bisect
 import math
 import statistics
 from dataclasses import dataclass
@@ -19,6 +20,13 @@ BAD_MARGIN_KWH = 2.0
 SCORE_DAYS = 91  # about the last 3 months
 STEP_MIN = 15  # default step of the car's charge timer, in minutes
 TARGET_STEP = 5  # the target SoC is rounded up to this many %
+# The effects model (#25)
+EFFECT_DAYS = 365  # the pick of key families is scored on these last days
+SHRINK = 10  # an effect is shrunk toward 0 by n / (n + SHRINK)
+MIN_COUNT = 8  # a key value needs this many past days to have an effect
+MAX_KEYS = 3
+NOISE_Z = 2.0  # a key value's effect counts only if its median is this many standard errors from 0
+MIN_GAIN = 0.015  # a key is added only if it lowers the normal-day error by this share
 
 # The car's AC levels: (name, meter kW, battery kW), measured 2024-11 → 2026-10.
 LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
@@ -73,6 +81,7 @@ class Forecast:
     real_kwh: float | None = None
     start: int = 0  # the day's first ms, local time
     choice: tuple[str, ...] = ()  # the calendar keys of the pool
+    effect_kwh: float = 0.0  # added by the effects model (#25)
 
 
 def chain(choice: tuple[str, ...], dtype: str) -> list[tuple[str, ...]]:
@@ -151,11 +160,11 @@ def score(fs: list[Forecast]) -> dict[str, dict]:
     return out
 
 
-def beats(s: dict, base: dict) -> bool:
-    """Bad-day coverage not lower, and normal-day error lower."""
+def beats(s: dict, base: dict, gain: float = 0.0) -> bool:
+    """Bad-day coverage not lower, and normal-day error lower (by more than gain)."""
     return (
         s["covered_pct"] >= base["covered_pct"]
-        and s["normal_error_kwh"] < base["normal_error_kwh"] - 1e-9
+        and s["normal_error_kwh"] < base["normal_error_kwh"] - gain - 1e-9
     )
 
 
@@ -192,6 +201,94 @@ def pick(
         best["picked"] = True
         picks[k] = best["choice"]
     return picks, rows
+
+
+class Effects:
+    """What a list of key families learned: per key and value (the kind of
+    day and the family's value), the sorted residuals of the past days."""
+
+    def __init__(self, keys: tuple[str, ...]):
+        self.keys = keys
+        self.seen: list[dict[tuple, list[float]]] = [{} for _ in keys]
+
+    def values(self, d: date, dtype: str) -> list[tuple]:
+        return [(kind(dtype), ck.FAMILIES[k](d, dtype)) for k in self.keys]
+
+    @staticmethod
+    def effect(rs: list[float] | None) -> float:
+        """The median residual, shrunk toward 0 by its count; 0 if it looks like noise."""
+        if not rs or len(rs) < MIN_COUNT:
+            return 0.0
+        n, med = len(rs), statistics.median(rs)
+        # Noise: the median is within NOISE_Z standard errors of 0.
+        if abs(med) < NOISE_Z * 1.25 * statistics.stdev(rs) / math.sqrt(n):
+            return 0.0
+        return med * n / (n + SHRINK)
+
+    def of(self, d: date, dtype: str) -> list[float]:
+        """The effect of each key for a day, from the days learned so far."""
+        return [
+            self.effect(s.get(v)) for s, v in zip(self.seen, self.values(d, dtype), strict=True)
+        ]
+
+    def learn(self, d: date, dtype: str, residual: float) -> None:
+        """Each key learns what is left after the keys before it."""
+        effects = self.of(d, dtype)
+        for s, v, e in zip(self.seen, self.values(d, dtype), effects, strict=True):
+            bisect.insort(s.setdefault(v, []), residual)
+            residual -= e
+
+    def table(self) -> list[dict]:
+        """Per key value with enough days: its effect and count."""
+        return [
+            {"key": k, "kind": v[0], "value": v[1], "effect_kwh": self.effect(rs), "n": len(rs)}
+            for k, s in zip(self.keys, self.seen, strict=True)
+            for v, rs in sorted(s.items(), key=lambda x: str(x[0]))
+            if len(rs) >= MIN_COUNT
+        ]
+
+
+def shifted(f: Forecast, e: float) -> Forecast:
+    """The forecast with an effect added; the need is never below 0."""
+    normal, bad = max(f.normal_kwh + e, 0.0), max(f.bad_kwh + e, 0.0)
+    return Forecast(f.day, f.day_type, normal, bad, f.real_kwh, f.start, f.choice, e)
+
+
+def walk(base: list[Forecast], keys: tuple[str, ...]) -> tuple[list[Forecast], Effects]:
+    """Walk forward in date order: each day's effects come only from the
+    days before it, then the day is learned. base: the back-test of today's
+    rule, with real_kwh."""
+    m = Effects(keys)
+    out = []
+    for f in sorted(base, key=lambda f: f.day):
+        out.append(shifted(f, sum(m.of(f.day, f.day_type))))
+        m.learn(f.day, f.day_type, f.real_kwh - f.normal_kwh)
+    return out, m
+
+
+def select(base: list[Forecast], days: int = EFFECT_DAYS) -> tuple[tuple[str, ...], list[dict]]:
+    """Forward selection of key families: add the family that lowers the
+    walk-forward error of the last days most, while it beats the model
+    before it; stop when none does. Returns the keys and a row per step."""
+    if not base:
+        return (), []
+    first = max(f.day for f in base) - timedelta(days=days - 1)
+
+    def run(keys):
+        fs, _m = walk(base, keys)
+        return {"keys": keys, **score([f for f in fs if f.day >= first])["all"]}
+
+    keys, best = (), run(())
+    rows = [best]
+    while len(keys) < MAX_KEYS:
+        tries = [run(keys + (k,)) for k in ck.FAMILIES if k not in keys]
+        good = [t for t in tries if beats(t, best, best["normal_error_kwh"] * MIN_GAIN)]
+        if not good:
+            break
+        best = min(good, key=lambda t: t["normal_error_kwh"])
+        keys = best["keys"]
+        rows.append(best)
+    return keys, rows
 
 
 def night_zone(evening: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
@@ -300,7 +397,14 @@ def plan(
     today = local.date()
     past = daily_need(r, tz, today - timedelta(days=1))
     picks, r.forecast_tries = pick(past, hols, ranges)
-    r.forecasts = backtest(past, hols, ranges=ranges, choices=picks)
+    # The effects model (#25): today's rule plus the effects of the key
+    # families that win the walk-forward back-test; none: today's rule.
+    hist = backtest(past, hols, len(past), ranges, picks)
+    keys, rows = select(hist)
+    fs, m = walk(hist, keys)
+    r.forecast_effects = {"keys": keys, "rows": rows, "table": m.table()}
+    last = max(past) if past else today
+    r.forecasts = [f for f in fs if f.day > last - timedelta(days=SCORE_DAYS)]
     for f in r.forecasts:
         f.start = day_start(f.day, tz)
     day = (local + timedelta(hours=12)).date()
@@ -308,6 +412,15 @@ def plan(
     f = forecast(need, day, hols, ranges, picks)
     if f is None or soc_now is None:
         return None
+    if keys:
+        for d in sorted(set(need) - set(past)):  # today, in the evening
+            b = forecast(need, d, hols, ranges, picks)
+            if b is not None:
+                m.learn(d, b.day_type, need[d] - b.normal_kwh)
+        effects = m.of(day, f.day_type)
+        f = shifted(f, sum(effects))
+    else:
+        effects = []
     # The departure of the day type; else the default. None: the zone end.
     hhmm = (departures or {}).get(f.day_type, departure)
     dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None
@@ -328,5 +441,9 @@ def plan(
         "capped": a.capped,
         "preheat_off": preheat_off,
         "message": message(f, soc_now, a, preheat_off),
+        "effects": [
+            {"key": k, "value": v[1], "effect_kwh": round(e, 1)}
+            for k, v, e in zip(keys, m.values(day, f.day_type), effects, strict=True)
+        ],
         "score": score(r.forecasts),
     }

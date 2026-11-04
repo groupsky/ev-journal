@@ -72,14 +72,61 @@ holidays to learn from alone.
 - Standby drain is left out. It is about 0.2 kWh a day, well under the
   margin, and the trips do not include it.
 
+### Rhythms: effects
+
+[#25](https://github.com/groupsky/ev-journal/issues/25). The pools above
+split the days, so each pool is small. To find any regular rise or drop with
+no manual input, the forecast also learns **effects** on top of the pool's
+forecast ("today's rule").
+
+- **Key families** (`calendar_keys.FAMILIES`), generated, each a small
+  function: `weekday`; `day_of_month` (1–31); `day_from_month_end` (1 is the
+  last day); `nth_weekday` (for example the first Tuesday);
+  `week_mod2/3/4` and `month_mod2/3/4` (every 2nd, 3rd, 4th week or month,
+  with each phase); `month`; `day_type`. Weeks count from a fixed Monday and
+  months over the years, so a rhythm goes on over the new year.
+- **Effect.** For each kind of day (workday or off) and each value of a
+  family: the median of the residuals (real − today's rule) of the past
+  days with that value, shrunk toward 0 by n / (n + 10). A value with fewer
+  than 8 days, or whose median is less than 2 standard errors from 0, has no
+  effect. The normal day and the bad day both get the effects added (never
+  below 0).
+- **Walk forward.** The days are taken in date order. A day gets the effects
+  learned from the days before it, then it is learned. So every scored day
+  gets its effects only from days before it. In the evening, today is
+  learned too, with the trips so far, as in today's pool. Two things are
+  not out of sample: the keys of today's rule are picked on the last 91
+  days, and the families are picked on the same 365 days they are scored
+  on. The guards keep a family picked by chance unlikely.
+- **Pick.** Forward selection at every run, scored on the last 365 days:
+  add the family that lowers the normal-day error most, while it beats the
+  model before it (bad-day coverage not lower, normal-day error lower by at
+  least 1.5 %); stop when none does, or at 3 families. A later family
+  learns what is left after the ones before it. With none picked, today's
+  rule is used unchanged. So the effects are used only while they win on
+  the real data, and turn off again by themselves.
+- These are fixed numbers in `forecast.py`, not settings. On made-up noise
+  they pick nothing; a planted +4 kWh on every 5th is found.
+- Named ranges (`EVJ_DAY_TYPES`) stay for changes with no rhythm.
+
+`ev-journal dry-run` prints each step of the pick (keys, days, bad-day
+coverage, normal-day error) and the effects of the used keys with their
+count, for example `month_mod2 = 1 (workday): +1.8 kWh (n = 160)`. The
+`advice` output lists the effects for that day.
+
+On real data to 2026-11-03 there are about 4 months of trips. No family
+wins yet, so today's rule is used: a monthly rhythm needs at least 8 past
+days of the same value.
+
 ### Back-test
 
 Each of the last 91 days is forecast only from the days before it, with
-the picked keys. `ev-journal dry-run` prints it, and then each tried choice
-per kind (days, bad-day coverage, normal-day error) and which one was
-picked. `ev_forecast` keeps it per day. The picking uses the same 91 days
-it is scored on. The table below is from before the keys. On real data
-to 2026-10-31 (91 days):
+the picked keys and the effects. `ev-journal dry-run` prints it, and then
+each tried choice per kind (days, bad-day coverage, normal-day error) and
+which one was picked. `ev_forecast` keeps it per day. The keys are picked
+on the same 91 days they are scored on; the effects families on the last
+365 days. The table below is from before the keys. On real data to
+2026-10-31 (91 days):
 
 | N days | quantile | margin | bad day covers | mean over-forecast |
 |---|---|---|---|---|

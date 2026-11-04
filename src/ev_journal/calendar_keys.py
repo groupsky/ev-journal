@@ -56,3 +56,59 @@ def value(choice: tuple[str, ...], d: date, dtype: str) -> tuple:
 def window(choice: tuple[str, ...], base: int) -> int:
     """The window of a choice: the longest of its keys; base for no key."""
     return max((WINDOW[k] for k in choice), default=base)
+
+
+# Families of keys for the effects model (#25). Each family maps a day to a
+# value; the model learns an effect in kWh for each value. The families are
+# generated, not hand-listed, so a new rhythm needs no code.
+
+
+def day_of_month(d: date, dtype: str) -> int:
+    return d.day  # 1 … 31
+
+
+def day_from_month_end(d: date, dtype: str) -> int:
+    """1 for the last day of the month, 2 for the day before it, …"""
+    nxt = date(d.year + d.month // 12, d.month % 12 + 1, 1)
+    return (nxt - d).days
+
+
+def nth_weekday(d: date, dtype: str) -> tuple[int, int]:
+    """(N, weekday): (1, 1) is the first Tuesday of the month."""
+    return (d.day - 1) // 7 + 1, d.weekday()
+
+
+def week_mod(k: int):
+    """Week number mod k. Weeks count from a fixed Monday, so the rhythm
+    goes on over the new year (ISO weeks restart at 1)."""
+
+    def f(d: date, dtype: str) -> int:
+        return (d.toordinal() - 1) // 7 % k  # date(1, 1, 1) is a Monday
+
+    f.__name__ = f"week_mod{k}"
+    return f
+
+
+def month_mod(k: int):
+    """Month number mod k, counted over the years: every k-th month."""
+
+    def f(d: date, dtype: str) -> int:
+        return (d.year * 12 + d.month - 1) % k
+
+    f.__name__ = f"month_mod{k}"
+    return f
+
+
+FAMILIES = {
+    f.__name__: f
+    for f in (
+        weekday,
+        day_of_month,
+        day_from_month_end,
+        nth_weekday,
+        *(week_mod(k) for k in (2, 3, 4)),
+        *(month_mod(k) for k in (2, 3, 4)),
+        month,
+        day_type,
+    )
+}
