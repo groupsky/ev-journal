@@ -121,11 +121,12 @@ days of the same value.
 ### Back-test
 
 Each of the last 91 days is forecast only from the days before it, with
-the picked keys and the effects. `ev-journal dry-run` prints it, and then each tried choice
-per kind (days, bad-day coverage, normal-day error) and which one was
-picked. `ev_forecast` keeps it per day. The keys are picked on the same 91
-days they are scored on; the effects families on the last 365 days. The table below is from before the keys. On real data
-to 2026-10-31 (91 days):
+the picked keys and the effects. `ev-journal dry-run` prints it, and then
+each tried choice per kind (days, bad-day coverage, normal-day error) and
+which one was picked. `ev_forecast` keeps it per day. The keys are picked
+on the same 91 days they are scored on; the effects families on the last
+365 days. The table below is from before the keys. On real data to
+2026-10-31 (91 days):
 
 | N days | quantile | margin | bad day covers | mean over-forecast |
 |---|---|---|---|---|

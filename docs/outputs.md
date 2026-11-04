@@ -161,7 +161,8 @@ or `null`. `start`, `end` and `departure` are local ISO times; `level` is
 `null` when no charge is needed. `score` holds the back-test per day type and
 `all` (extra day types count as workdays there). `effects` lists the
 calendar rhythms the forecast uses and what each adds for that day, in kWh
-(0 when the day's value has no effect); `[]` when today's rule is used ([forecast.md](forecast.md#rhythms-effects)).
+(0 when the day's value has no effect); `[]` when today's rule is used
+([forecast.md](forecast.md#rhythms-effects)).
 
 `home_charge` is the SoC estimate of a home charge since the car last came
 home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`
