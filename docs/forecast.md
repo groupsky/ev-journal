@@ -54,18 +54,21 @@ holidays to learn from alone.
   `calendar_keys.py`, apart from the pool code, so a later forecast can
   reuse them.
 - **The back-test picks the keys**, for each kind on its own, at every
-  run: no key, each key alone, and the pair of the two single keys with the
-  lowest normal-day error. A choice *beats* no key when its bad-day
-  coverage is not lower and its normal-day error is lower. The pick is the
-  simplest choice that beats no key: the best single key, else the pair,
-  else no key. So a key is used only when it beats the base rule on the
-  real data.
+  run. It tries no key and each key alone. A choice *beats* no key when its
+  bad-day coverage is not lower and its normal-day error is lower; all are
+  scored on the days that no key scores. The pick is the single key with
+  the lowest error among those that beat no key. When none does, it tries
+  the pair of the two single keys with the lowest error, and picks it if it
+  beats no key. Else no key. So a key is used only when it beats the base
+  rule on the real data.
 - **Fallback.** A pool with fewer than 3 days falls back to the next
   simpler choice: a pair to its first key, then to no key.
 - **Extra types.** A day of an extra type (`EVJ_DAY_TYPES`) first pools from
   past days of the same name in the last 365 days. Fill in past periods too,
   so it has days to learn from. With fewer than 3 such days it falls back
-  to the picked choice of workdays.
+  to the picked choice of workdays. This is not part of the pick: a named
+  range is the owner's statement that those days differ. In the back-test,
+  every choice (no key too) pools named days this way.
 - Standby drain is left out. It is about 0.2 kWh a day, well under the
   margin, and the trips do not include it.
 

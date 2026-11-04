@@ -163,28 +163,30 @@ def pick(
     need: dict[date, float], holidays: set[date], ranges=(), days: int = SCORE_DAYS
 ) -> tuple[dict[str, tuple[str, ...]], list[dict]]:
     """Per kind, the simplest choice of calendar keys that beats no key in the
-    back-test: the best single key, else the pair of the two best single
-    keys, else no key. Returns the picks and a row for each tried choice."""
+    back-test: the single key with the lowest error among those that beat
+    it; else the pair of the two single keys with the lowest error, if it
+    beats it; else no key. Returns the picks and a row for each tried choice."""
     picks, rows = {}, []
     for k in ("workday", "off"):
+        base_fs = backtest(need, holidays, days, ranges, only=k)
+        if not base_fs:
+            continue
+        base_days = {f.day for f in base_fs}
 
-        def run(choice, k=k):
+        def run(choice, k=k, base_days=base_days):
             fs = backtest(need, holidays, days, ranges, {k: choice}, only=k)
-            if not fs:
-                return None
+            # Only the days that no key scores, so all choices compare alike.
+            fs = [f for f in fs if f.day in base_days]
             s = score(fs)["all"]
             rows.append({"kind": k, "choice": choice, **s, "picked": False})
             return rows[-1]
 
         base = run(())
-        if base is None:
-            continue
-        singles = [r for r in (run((key,)) for key in ck.KEYS) if r is not None]
-        singles.sort(key=lambda r: r["normal_error_kwh"])
+        singles = sorted((run((key,)) for key in ck.KEYS), key=lambda r: r["normal_error_kwh"])
         best = next((r for r in singles if beats(r, base)), None)
-        if best is None and len(singles) >= 2:
+        if best is None:
             pair = run(singles[0]["choice"] + singles[1]["choice"])
-            if pair is not None and beats(pair, base):
+            if beats(pair, base):
                 best = pair
         best = best or base
         best["picked"] = True

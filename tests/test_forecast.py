@@ -242,13 +242,15 @@ def test_pool_by_weekday_and_fallback():
 
 def test_named_range_pools_from_the_same_name():
     need = weekday_need(10)
-    for d in need:  # the "alt" days, Tuesday to Friday, need 30 kWh
-        if date(2026, 2, 3) <= d and d.weekday() < 5:
-            need[d] = 30.0
     ranges = (
         ("alt", date(2026, 2, 3), date(2026, 2, 6)),
         ("alt", date(2026, 3, 1), date(2026, 3, 31)),
     )
+    for d in need:  # the "alt" workdays need 30 kWh; the others 5 or 15
+        if any(a <= d <= b for _n, a, b in ranges) and d.weekday() < 5:
+            need[d] = 30.0
+    # The plain 28-day pool would give 5: most of its days are not "alt".
+    assert forecast.forecast(need, date(2026, 3, 3), set()).normal_kwh == 5.0
     f = forecast.forecast(need, date(2026, 3, 3), set(), ranges)
     assert (f.day_type, f.choice, f.normal_kwh) == ("alt", ("day_type",), 30.0)
     # The first days of a range: too few past "alt" days, so all workdays.
