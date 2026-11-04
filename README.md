@@ -39,7 +39,7 @@ environment points to.
 | `EVJ_DAYS_OFF` | extra days off, `YYYY-MM-DD,…` | — |
 | `EVJ_DEPARTURE` | departure, `HH:MM`, for every day type without its own; the charge ends by then | — |
 | `EVJ_DEPARTURE_<TYPE>` | departure for one day type (`WORKDAY`, `WEEKEND`, `HOLIDAY` or an extra type), `HH:MM` or `none` (end at the night zone end) | — |
-| `EVJ_DAY_TYPES` | extra day types by date range, `name:YYYY-MM-DD..YYYY-MM-DD,…` (both days included) | — |
+| `EVJ_DAY_TYPES` | extra day types by date range, `name:YYYY-MM-DD..YYYY-MM-DD,…` (both days included); each name has its own departure and forecast pool ([forecast](docs/forecast.md)) | — |
 | `EVJ_TIMER_STEP_MIN` | step of the car's charge timer, minutes | `15` |
 | `EVJ_RESERVE_PCT` | SoC % added to the bad-day need | `10` |
 | `EVJ_PREHEAT` | `1` when a weekday preheat is set in the car | — |
