@@ -396,3 +396,21 @@ def test_plan_uses_the_effects_only_when_they_win(monkeypatch, capsys, tmp_path)
     a = plan(r, UTC, now, 50.0, KPP, set())
     assert r.forecast_effects["keys"] == () and a["effects"] == []
     assert not any(f.effect_kwh for f in r.forecasts)
+
+
+def test_the_evening_forecast_learns_today(monkeypatch):
+    # In the evening, today is learned too: the forecast for tomorrow is the
+    # one the next day's back-test gives for that day. Every third week
+    # needs 3 kWh more; no key of #23 catches it.
+    third = noisy_need(lambda d: 3.0 if (d.toordinal() - 1) // 7 % 3 == 0 else 0.0, days=760)
+    need = {d: x for d, x in third.items() if d < date(2027, 1, 22)}  # to Thursday 21st
+    seen = []
+    real = forecast.shifted
+    monkeypatch.setattr(forecast, "shifted", lambda f, e: seen.append(e) or real(f, e))
+    plan(result_of(need), UTC, int(at(date(2027, 1, 20), 20).timestamp() * 1000), 50.0, KPP, set())
+    evening = seen[-1]  # the forecast for Thursday 21st, made on Wednesday evening
+    r = result_of(need)
+    plan(r, UTC, int(at(date(2027, 1, 22), 20).timestamp() * 1000), 50.0, KPP, set())
+    assert r.forecast_effects["keys"][0] == "week_mod3"
+    [f] = [f for f in r.forecasts if f.day == date(2027, 1, 21)]
+    assert f.effect_kwh != 0.0 and evening == f.effect_kwh

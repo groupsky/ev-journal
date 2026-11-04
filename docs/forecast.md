@@ -93,7 +93,11 @@ forecast ("today's rule").
   below 0).
 - **Walk forward.** The days are taken in date order. A day gets the effects
   learned from the days before it, then it is learned. So every scored day
-  is forecast only from days before it.
+  gets its effects only from days before it. In the evening, today is
+  learned too, with the trips so far, as in today's pool. Two things are
+  not out of sample: the keys of today's rule are picked on the last 91
+  days, and the families are picked on the same 365 days they are scored
+  on. The guards keep a family picked by chance unlikely.
 - **Pick.** Forward selection at every run, scored on the last 365 days:
   add the family that lowers the normal-day error most, while it beats the
   model before it (bad-day coverage not lower, normal-day error lower by at
@@ -119,8 +123,8 @@ days of the same value.
 Each of the last 91 days is forecast only from the days before it, with
 the picked keys and the effects. `ev-journal dry-run` prints it, and then each tried choice
 per kind (days, bad-day coverage, normal-day error) and which one was
-picked. `ev_forecast` keeps it per day. The picking uses the same 91 days
-it is scored on. The table below is from before the keys. On real data
+picked. `ev_forecast` keeps it per day. The keys are picked on the same 91
+days they are scored on; the effects families on the last 365 days. The table below is from before the keys. On real data
 to 2026-10-31 (91 days):
 
 | N days | quantile | margin | bad day covers | mean over-forecast |
