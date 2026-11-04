@@ -284,3 +284,18 @@ def test_pick_tries_the_pair_of_the_two_best_keys(monkeypatch):
         key=lambda r: r["normal_error_kwh"],
     )
     assert picks["workday"] == singles[0]["choice"] + singles[1]["choice"]
+
+
+def test_dry_run_prints_every_tried_choice(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+
+    r = Result(trips=[], journeys=[], outings=[], months=[])
+    _picks, r.forecast_tries = forecast.pick(weekday_need(30), set())
+    monkeypatch.setattr(cli, "compute", lambda s: r)
+    monkeypatch.setattr(cli, "away", lambda *a: "-")
+    cli.dry_run(SimpleNamespace(data_dir=tmp_path))
+    out = capsys.readouterr().out
+    assert "workday no key" in out and "weekday" in out and "month_part" in out
+    assert out.count("<- picked") == 2

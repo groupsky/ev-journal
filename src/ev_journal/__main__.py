@@ -240,6 +240,16 @@ def dry_run(s: Settings) -> None:
             f"  {dtype:8s} {sc['days']:3d}  {sc['covered_pct']:5.1f} %"
             f"  {sc['normal_error_kwh']:.1f} kWh"
         )
+    print(
+        "forecast choices tried (same 91 days): kind, keys, days, bad day covers, normal day error"
+    )
+    for t in r.forecast_tries:
+        keys = "+".join(t["choice"]) or "no key"
+        mark = "  <- picked" if t["picked"] else ""
+        print(
+            f"  {t['kind']:7s} {keys:28s} {t['days']:3d}  {t['covered_pct']:5.1f} %"
+            f"  {t['normal_error_kwh']:.1f} kWh{mark}"
+        )
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
