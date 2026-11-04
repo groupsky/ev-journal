@@ -147,6 +147,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "advice": {"day": "2026-01-11", "day_type": "weekend", "normal_kwh": 6.6, "bad_kwh": 14.2,
              "soc_now": 40.0, "target": 60, "level": "low", "start": "…", "end": "…",
              "departure": null, "capped": false, "preheat_off": false, "message": "Утре: …",
+             "effects": [{"key": "month_mod2", "value": 1, "effect_kwh": 1.8}],
              "score": {"all": {"days": 91, "covered_pct": 92.3, "normal_error_kwh": 3.7}}}
 }
 ```
@@ -158,7 +159,9 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
 `advice` is tomorrow's forecast and charging advice ([forecast.md](forecast.md)),
 or `null`. `start`, `end` and `departure` are local ISO times; `level` is
 `null` when no charge is needed. `score` holds the back-test per day type and
-`all` (extra day types count as workdays there).
+`all` (extra day types count as workdays there). `effects` lists the
+calendar rhythms the forecast uses and what each adds for that day, in kWh;
+`[]` when today's rule is used ([forecast.md](forecast.md#rhythms-effects)).
 
 `home_charge` is the SoC estimate of a home charge since the car last came
 home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`
