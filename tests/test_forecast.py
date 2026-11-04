@@ -215,3 +215,72 @@ def test_departure_per_day_type():
     a = plan(r, UTC, sat, 5.0, KPP, set(), "05:00", departures=deps, ranges=ranges)
     assert a["day_type"] == "weekend" and a["departure"] is None
     assert a["end"] == at(date(2026, 2, 7), 6).isoformat()
+
+
+def weekday_need(weeks: int) -> dict[date, float]:
+    """Mondays 15 kWh, other workdays 5, weekends 0, from Monday 2026-01-05."""
+    d0 = date(2026, 1, 5)
+    need = {}
+    for i in range(weeks * 7):
+        d = d0 + timedelta(days=i)
+        need[d] = 0.0 if d.weekday() >= 5 else 15.0 if d.weekday() == 0 else 5.0
+    return need
+
+
+def test_pool_by_weekday_and_fallback():
+    need = weekday_need(10)
+    mon = date(2026, 3, 16)
+    f = forecast.forecast(need, mon, set(), choices={"workday": ("weekday",)})
+    assert (f.choice, f.normal_kwh) == (("weekday",), 15.0)
+    # Only 2 past Mondays: too few, so the pool falls back to all workdays.
+    f = forecast.forecast(need, date(2026, 1, 19), set(), choices={"workday": ("weekday",)})
+    assert (f.choice, f.normal_kwh) == ((), 5.0)
+    # A pair falls back to its first key.
+    f = forecast.forecast(need, mon, set(), choices={"workday": ("weekday", "month")})
+    assert (f.choice, f.normal_kwh) == (("weekday",), 15.0)
+
+
+def test_named_range_pools_from_the_same_name():
+    need = weekday_need(10)
+    for d in need:  # the "alt" days, Tuesday to Friday, need 30 kWh
+        if date(2026, 2, 3) <= d and d.weekday() < 5:
+            need[d] = 30.0
+    ranges = (
+        ("alt", date(2026, 2, 3), date(2026, 2, 6)),
+        ("alt", date(2026, 3, 1), date(2026, 3, 31)),
+    )
+    f = forecast.forecast(need, date(2026, 3, 3), set(), ranges)
+    assert (f.day_type, f.choice, f.normal_kwh) == ("alt", ("day_type",), 30.0)
+    # The first days of a range: too few past "alt" days, so all workdays.
+    ranges = (("alt", date(2026, 2, 3), date(2026, 2, 4)),)
+    f = forecast.forecast(need, date(2026, 2, 4), set(), ranges)
+    assert (f.day_type, f.choice, f.normal_kwh) == ("alt", (), 5.0)
+    # A weekend inside a range stays a weekend.
+    f = forecast.forecast(
+        need, date(2026, 3, 7), set(), (("alt", date(2026, 3, 1), date(2026, 3, 31)),)
+    )
+    assert f.day_type == "weekend"
+
+
+def test_pick_keeps_a_key_only_when_it_beats_no_key():
+    picks, rows = forecast.pick(weekday_need(30), set())
+    assert picks["workday"] == ("weekday",)
+    assert picks["off"] == ()  # all off days are 0: no key can do better
+    tried = {(r["kind"], r["choice"]) for r in rows}
+    assert ("workday", ()) in tried and ("workday", ("month",)) in tried
+    assert sum(r["picked"] for r in rows) == 2
+    # Every workday the same: nothing beats no key.
+    flat = {d: 0.0 if d.weekday() >= 5 else 5.0 for d in weekday_need(30)}
+    picks, rows = forecast.pick(flat, set())
+    assert picks["workday"] == ()
+
+
+def test_pick_tries_the_pair_of_the_two_best_keys(monkeypatch):
+    # When no single key beats no key, the pair of the two best is tried.
+    monkeypatch.setattr(forecast, "beats", lambda s, base: len(s["choice"]) == 2)
+    picks, rows = forecast.pick(weekday_need(30), set())
+    singles = sorted(
+        (r for r in rows if r["kind"] == "workday" and len(r["choice"]) == 1),
+        key=lambda r: r["normal_error_kwh"],
+    )
+    assert picks["workday"] == singles[0]["choice"] + singles[1]["choice"]

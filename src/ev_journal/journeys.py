@@ -222,6 +222,7 @@ class Result:
     backtest: list[float] = field(default_factory=list)  # end SoC errors, %
     soc_model: "object | None" = None  # homecharge.Model of all home charges
     forecasts: list = field(default_factory=list)  # forecast.Forecast, scored days
+    forecast_tries: list = field(default_factory=list)  # forecast.pick rows
     advice: dict | None = None  # tomorrow's forecast and charging advice
 
 
