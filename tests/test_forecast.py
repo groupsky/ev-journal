@@ -361,3 +361,38 @@ def test_a_day_uses_only_the_days_before_it():
     fs2, _m = forecast.walk(later, ("day_of_month",))
     assert [f for f in fs if f.day <= day] == [f for f in fs2 if f.day <= day]
     assert fs[-1].day.day == 5 and fs[-1].effect_kwh < fs2[-1].effect_kwh
+
+
+def result_of(need: dict[date, float]) -> Result:
+    trips = [
+        Trip(start=int(at(d, 8).timestamp() * 1000), end=int(at(d, 9).timestamp() * 1000), kwh=x)
+        for d, x in need.items()
+    ]
+    return Result(trips=trips, journeys=[], outings=[], months=[])
+
+
+def test_plan_uses_the_effects_only_when_they_win(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+
+    fifth = noisy_need(lambda d: 4.0 if d.day == 5 else 0.0, days=760)  # to 2027-02-04
+    now = int(at(date(2027, 2, 4), 20).timestamp() * 1000)  # evening before the 5th
+    r = result_of(fifth)
+    a = plan(r, UTC, now, 50.0, KPP, set())
+    assert r.forecast_effects["keys"] == ("day_of_month",)
+    [e] = a["effects"]
+    assert (e["key"], e["value"]) == ("day_of_month", 5) and e["effect_kwh"] > 1.0
+    assert any(f.effect_kwh for f in r.forecasts)
+    r.trips = []  # dry-run's month table needs months; not part of this test
+    monkeypatch.setattr(cli, "compute", lambda s: r)
+    monkeypatch.setattr(cli, "away", lambda *a: "-")
+    cli.dry_run(SimpleNamespace(data_dir=tmp_path))
+    out = capsys.readouterr().out
+    assert "today's rule" in out and "day_of_month  " in out and "<- used" in out
+    assert "day_of_month = 5 (workday): +" in out
+    # Pure noise: today's rule stays, the same forecast as without the model.
+    r = result_of(noisy_need(lambda d: 0.0, days=760))
+    a = plan(r, UTC, now, 50.0, KPP, set())
+    assert r.forecast_effects["keys"] == () and a["effects"] == []
+    assert not any(f.effect_kwh for f in r.forecasts)

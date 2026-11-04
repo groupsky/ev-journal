@@ -397,7 +397,14 @@ def plan(
     today = local.date()
     past = daily_need(r, tz, today - timedelta(days=1))
     picks, r.forecast_tries = pick(past, hols, ranges)
-    r.forecasts = backtest(past, hols, ranges=ranges, choices=picks)
+    # The effects model (#25): today's rule plus the effects of the key
+    # families that win the walk-forward back-test; none: today's rule.
+    hist = backtest(past, hols, len(past), ranges, picks)
+    keys, rows = select(hist)
+    fs, m = walk(hist, keys)
+    r.forecast_effects = {"keys": keys, "rows": rows, "table": m.table()}
+    last = max(past) if past else today
+    r.forecasts = [f for f in fs if f.day > last - timedelta(days=SCORE_DAYS)]
     for f in r.forecasts:
         f.start = day_start(f.day, tz)
     day = (local + timedelta(hours=12)).date()
@@ -405,6 +412,15 @@ def plan(
     f = forecast(need, day, hols, ranges, picks)
     if f is None or soc_now is None:
         return None
+    if keys:
+        for d in sorted(set(need) - set(past)):  # today, in the evening
+            b = forecast(need, d, hols, ranges, picks)
+            if b is not None:
+                m.learn(d, b.day_type, need[d] - b.normal_kwh)
+        effects = m.of(day, f.day_type)
+        f = shifted(f, sum(effects))
+    else:
+        effects = []
     # The departure of the day type; else the default. None: the zone end.
     hhmm = (departures or {}).get(f.day_type, departure)
     dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None
@@ -425,5 +441,9 @@ def plan(
         "capped": a.capped,
         "preheat_off": preheat_off,
         "message": message(f, soc_now, a, preheat_off),
+        "effects": [
+            {"key": k, "value": v[1], "effect_kwh": round(e, 1)}
+            for k, v, e in zip(keys, m.values(day, f.day_type), effects, strict=True)
+        ],
         "score": score(r.forecasts),
     }

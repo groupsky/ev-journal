@@ -250,6 +250,25 @@ def dry_run(s: Settings) -> None:
             f"  {t['kind']:7s} {keys:28s} {t['days']:3d}  {t['covered_pct']:5.1f} %"
             f"  {t['normal_error_kwh']:.1f} kWh{mark}"
         )
+    fe = r.forecast_effects
+    if fe.get("rows"):
+        print(
+            f"forecast effects (walk forward, last {forecast.EFFECT_DAYS} days):"
+            " keys, days, bad day covers, normal day error"
+        )
+        for t in fe["rows"]:
+            keys = "+".join(t["keys"]) or "today's rule"
+            mark = "  <- used" if t["keys"] == fe["keys"] else ""
+            print(
+                f"  {keys:40s} {t['days']:3d}  {t['covered_pct']:5.1f} %"
+                f"  {t['normal_error_kwh']:.2f} kWh{mark}"
+            )
+        for t in fe["table"]:
+            if t["key"] in fe["keys"] and t["effect_kwh"]:
+                print(
+                    f"  {t['key']} = {t['value']} ({t['kind']}):"
+                    f" {t['effect_kwh']:+.1f} kWh (n = {t['n']})"
+                )
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
