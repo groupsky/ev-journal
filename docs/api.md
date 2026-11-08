@@ -81,3 +81,16 @@ command and changes nothing.
 recompute, the same object as `advice` in the MQTT summary
 ([forecast.md](forecast.md)). `404` before the first recompute, or when
 there is no forecast (too little history, or no SoC known).
+
+`GET /advice?soc=<SoC % now>&km_home=<km to home>`: the same advice made
+again on request, for a client in the car on the way home
+([forecast.md](forecast.md#advice-on-request)). Both are optional; with
+either one, the response adds `soc_arrival` (the SoC expected at home) and
+`computed_at` (now), and the `message` starts with the arrival SoC. Without
+`soc`, the SoC of the last recompute is used. `soc` is 0–100, `km_home` is
+0 or more; other values give `422`. Without parameters `computed_at` and
+`soc_arrival` are `null`.
+
+The client finds home in `GET /places`: the place with `"kind": "home"`.
+It measures `km_home` from there (a straight line is fine; see the detour
+factor).

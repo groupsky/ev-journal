@@ -181,6 +181,29 @@ Left out for now:
   holiday adds "turn the preheat off". The car has no modem, so this is a
   message.
 
+## Advice on request
+
+A client in the car asks `GET /advice?soc=…&km_home=…` while it drives home,
+each time it heads home (he may go out again the same evening). ev-journal
+sees a trip only after it ends, so the client gives what it knows live.
+
+- **Arrival SoC** = `soc` − `km_home` × 1.3 × kWh per km ÷ kWh per %, not
+  below 0. Without `km_home`, the arrival SoC is `soc`.
+- **1.3 is the detour factor**: road km per km in a straight line, so the
+  client may send the straight-line distance to the `home` place.
+- **kWh per km**: the battery kWh ÷ km of the trips that started in the last
+  28 days (not "not me"); 0.18 when they have no km.
+- The forecast is the one of the last recompute (every `EVJ_INTERVAL_SEC`),
+  so today's trips so far count, as in the evening. Only the advice is made
+  again: from the arrival SoC, and the charge starts no earlier than now.
+  This keeps a request cheap.
+- The message starts with the arrival SoC: "При пристигане около 41 %.
+  Утре: …".
+- Limits: it gives `404` while there is no cached advice (also when the car's
+  SoC was unknown at the last recompute, even if the client sends `soc`). For
+  up to one interval after 12:00 the cached advice is still the one for this
+  morning, whose zone is over; the next recompute moves it to tomorrow.
+
 ## Delivery
 
 `advice` in the MQTT summary and `GET /advice`

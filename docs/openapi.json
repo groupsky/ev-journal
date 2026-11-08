@@ -12,6 +12,17 @@
             "title": "Capped",
             "type": "boolean"
           },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
           "day": {
             "title": "Day",
             "type": "string"
@@ -76,6 +87,17 @@
             },
             "title": "Score",
             "type": "object"
+          },
+          "soc_arrival": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soc Arrival"
           },
           "soc_now": {
             "title": "Soc Now",
@@ -849,6 +871,43 @@
     "/advice": {
       "get": {
         "operationId": "get_advice_advice_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "soc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Soc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "km_home",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Km Home"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

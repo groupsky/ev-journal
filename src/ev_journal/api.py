@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ev_journal import charges
+from ev_journal import charges, forecast
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -59,6 +59,8 @@ class Advice(BaseModel):
     preheat_off: bool
     message: str
     score: dict[str, Score]
+    soc_arrival: float | None = None  # only with soc or km_home (#27)
+    computed_at: str | None = None
 
 
 class PlaceIn(BaseModel):
@@ -271,9 +273,11 @@ def create_app(
     stops: Callable[[], list[tuple[int, float, float]]] = list,
     journeys: Callable[[], list[tuple[int, int]]] = list,
     advice: Callable[[], dict | None] = lambda: None,
+    advice_ctx: Callable[[], dict | None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
-    journeys the (start, end) of each journey, advice the last advice."""
+    journeys the (start, end) of each journey, advice the last advice and
+    advice_ctx what is needed to make it again on request."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -563,7 +567,15 @@ def create_app(
         return charge_price(conn, question_id)
 
     @r.get("/advice", response_model=Advice, responses=nf)
-    def get_advice():
+    def get_advice(
+        soc: float | None = Query(None, ge=0, le=100),
+        km_home: float | None = Query(None, ge=0),
+    ):
+        if soc is not None or km_home is not None:
+            ctx = advice_ctx()  # one read: the advice and its inputs match
+            if ctx is None:
+                raise Fail(404, "no advice yet")
+            return forecast.on_request(ctx, soc, km_home, datetime.now(tz))
         a = advice()
         if a is None:
             raise Fail(404, "no advice yet")
