@@ -292,3 +292,41 @@ def known_costs(db: sqlite3.Connection) -> dict[int, float]:
         " AND price_source IN ('receipt', 'answer') AND cost_eur IS NOT NULL"
     )
     return {r[0]: r[1] for r in rows}
+
+
+def estimate_at(db: sqlite3.Connection, pos: tuple[float, float], kind: str) -> dict:
+    """The price per battery kWh for a charge at this position, before there is a receipt.
+
+    For the car app during a charge. Best first: the last receipt or answer at the
+    matched station for the same kind (AC or DC), then the feed price (DC high end,
+    AC low end) × the loss ratio.
+    """
+    loss = loss_ratio(db)
+    sid, how = match(pos, all_stations(db))
+    out = {"station": None, "match": how, "eur_per_battery_kwh": None, "source": None}
+    out["loss_ratio"] = loss
+    if sid is None:
+        return out
+    name, max_kw, pmin, pmax = db.execute(
+        "SELECT name, max_power_kw, price_min, price_max FROM stations WHERE id = ?", (sid,)
+    ).fetchone()
+    out["station"] = {"id": sid, "name": name, "max_power_kw": max_kw}
+    last = db.execute(
+        "SELECT price_eur_per_kwh FROM charges WHERE station_id = ? AND type IN (?, ?)"
+        " AND at_home = 0"
+        " AND price_source IN ('receipt', 'answer') AND price_eur_per_kwh IS NOT NULL"
+        " ORDER BY id DESC LIMIT 1",
+        # Like the estimate in price(): an unknown type counts as DC.
+        (sid, "AC", "AC") if kind == "ac" else (sid, "DC", "unknown"),
+    ).fetchone()
+    if last:
+        out["eur_per_battery_kwh"], out["source"] = last[0], "last_receipt"
+        return out
+    unit = (
+        (pmin if pmin is not None else pmax)
+        if kind == "ac"
+        else (pmax if pmax is not None else pmin)
+    )
+    if unit is not None:
+        out["eur_per_battery_kwh"], out["source"] = unit * loss, "feed"
+    return out

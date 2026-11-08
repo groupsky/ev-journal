@@ -364,6 +364,36 @@
         "title": "Error",
         "type": "object"
       },
+      "EstimateStation": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_power_kw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Power Kw"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "max_power_kw"
+        ],
+        "title": "EstimateStation",
+        "type": "object"
+      },
       "Label": {
         "properties": {
           "journey_id": {
@@ -594,6 +624,70 @@
           "cursor"
         ],
         "title": "PlaceList",
+        "type": "object"
+      },
+      "PriceEstimate": {
+        "properties": {
+          "eur_per_battery_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eur Per Battery Kwh"
+          },
+          "loss_ratio": {
+            "description": "Network kWh per battery kWh.",
+            "title": "Loss Ratio",
+            "type": "number"
+          },
+          "match": {
+            "enum": [
+              "ok",
+              "unsure",
+              "no station"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "last_receipt",
+                  "feed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "station": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstimateStation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The nearest station within 75 m."
+          }
+        },
+        "required": [
+          "station",
+          "match",
+          "eur_per_battery_kwh",
+          "source",
+          "loss_ratio"
+        ],
+        "title": "PriceEstimate",
         "type": "object"
       },
       "Question": {
@@ -951,6 +1045,82 @@
           }
         },
         "summary": "Get Advice"
+      }
+    },
+    "/charges/price-estimate": {
+      "get": {
+        "description": "The price per battery kWh for a charge here, for the car app's charge screen.",
+        "operationId": "price_estimate_charges_price_estimate_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "dc",
+                "ac"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceEstimate"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Price Estimate"
       }
     },
     "/charges/{charge_id}/receipt": {
