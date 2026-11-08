@@ -62,8 +62,9 @@ required). The answer:
   75 m, or `null`. `match`: `ok`, `unsure` (two or more within 75 m) or
   `no station`, the same rule as above.
 - `eur_per_battery_kwh` and its `source`, best first:
-  1. `last_receipt`: the price of the latest charge at this station with a
-     receipt or an answer.
+  1. `last_receipt`: the price of the latest charge of the same kind at
+     this station with a receipt or an answer (a charge of unknown type
+     counts as DC).
   2. `feed`: the feed's price × the loss ratio. DC uses the high end of the
      site's range, AC the low end.
   Both are `null` when there is no station, or the station has no price.

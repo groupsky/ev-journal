@@ -300,4 +300,8 @@ def test_price_estimate_at_a_position(client, data_dir):
     assert got["source"] == "last_receipt"
     assert got["eur_per_battery_kwh"] == pytest.approx(16.5 / 30.0)
     assert got["loss_ratio"] == pytest.approx(36.0 / 30.0)
+    # The DC receipt does not price an AC charge there.
+    got = ask(0.5, 0.5, "ac")
+    assert (got["station"]["id"], got["source"]) == ("fines:1", "feed")
+    assert got["eur_per_battery_kwh"] == pytest.approx(0.40 * 36.0 / 30.0)
     assert client.get("/charges/price-estimate", params={"lat": 0, "lon": 0}).status_code == 422
