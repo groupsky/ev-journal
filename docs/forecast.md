@@ -199,6 +199,10 @@ sees a trip only after it ends, so the client gives what it knows live.
   This keeps a request cheap.
 - The message starts with the arrival SoC: "При пристигане около 41 %.
   Утре: …".
+- Limits: it gives `404` while there is no cached advice (also when the car's
+  SoC was unknown at the last recompute, even if the client sends `soc`). For
+  up to one interval after 12:00 the cached advice is still the one for this
+  morning, whose zone is over; the next recompute moves it to tomorrow.
 
 ## Delivery
 
