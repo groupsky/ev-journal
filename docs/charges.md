@@ -51,3 +51,23 @@ The `charges` table then has `price_eur_per_kwh` (EUR per **battery** kWh),
 `cost_eur`. A receipt or an answer replaces an estimate at once.
 
 Network kWh ÷ battery kWh is the charging loss at that station.
+
+## Price estimate during a charge
+
+The car's app shows a cost while it charges. It asks here and does not copy
+the rule: `GET /charges/price-estimate?lat=<>&lon=<>&kind=dc|ac` (`kind` is
+required). The answer:
+
+- `station`: `id`, `name` and `max_power_kw` of the nearest station within
+  75 m, or `null`. `match`: `ok`, `unsure` (two or more within 75 m) or
+  `no station`, the same rule as above.
+- `eur_per_battery_kwh` and its `source`, best first:
+  1. `last_receipt`: the price of the latest charge at this station with a
+     receipt or an answer.
+  2. `feed`: the feed's price × the loss ratio. DC uses the high end of the
+     site's range, AC the low end.
+  Both are `null` when there is no station, or the station has no price.
+- `loss_ratio`: the median of network ÷ battery kWh over receipts and
+  answers, or 1.10.
+
+The app keeps the last answer for when the internet drops.

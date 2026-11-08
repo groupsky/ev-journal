@@ -72,8 +72,9 @@ command and changes nothing.
 
 ## Away charges
 
-`POST /charges/{id}/receipt`, `GET /questions` and
-`POST /questions/{id}/answer`: see [charges.md](charges.md).
+`POST /charges/{id}/receipt`, `GET /questions`,
+`POST /questions/{id}/answer` and `GET /charges/price-estimate`: see
+[charges.md](charges.md).
 
 ## Advice
 
