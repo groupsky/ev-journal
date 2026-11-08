@@ -225,6 +225,7 @@ class Result:
     forecast_tries: list = field(default_factory=list)  # forecast.pick rows
     forecast_effects: dict = field(default_factory=dict)  # forecast.plan: keys, rows, table
     advice: dict | None = None  # tomorrow's forecast and charging advice
+    advice_ctx: dict | None = None  # forecast.plan: what forecast.on_request needs
 
 
 class Track:

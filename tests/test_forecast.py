@@ -414,3 +414,74 @@ def test_the_evening_forecast_learns_today(monkeypatch):
     assert r.forecast_effects["keys"][0] == "week_mod3"
     [f] = [f for f in r.forecasts if f.day == date(2027, 1, 21)]
     assert f.effect_kwh != 0.0 and evening == f.effect_kwh
+
+
+def driven(days: int = 28) -> Result:
+    """result() with 25 km per trip: 5 kWh / 25 km = 0.2 kWh per km."""
+    r = result(days, 5.0)
+    for t in r.trips:
+        t.km = 25.0
+    return r
+
+
+def ms(d: datetime) -> int:
+    return int(d.timestamp() * 1000)
+
+
+def test_advice_on_request_for_the_arrival_soc():
+    r = driven()
+    evening = at(date(2026, 2, 2), 20)
+    plan(r, UTC, ms(evening), 60.0, KPP, set())
+    assert r.advice_ctx["kwh_per_km"] == pytest.approx(0.2)
+    # 10 km home × 1.3 × 0.2 kWh/km = 2.6 kWh = 8.7 %: 30 % now, 21.3 % at home.
+    a = forecast.on_request(r.advice_ctx, 30.0, 10.0, evening)
+    assert a["soc_arrival"] == 21.3 and a["soc_now"] == 30.0
+    assert a["computed_at"] == evening.isoformat()
+    # The bad day is 7 kWh = 23.3 % + 10 % reserve: 35 %. 13.7 % = 4.1 kWh, 4.5 h at low.
+    assert (a["target"], a["level"]) == (35, "low")
+    assert a["start"] == at(date(2026, 2, 3), 1, 30).isoformat()
+    assert a["message"].startswith("При пристигане около 21 %. Утре:")
+    assert "Сега" not in a["message"]
+    # Without km_home the arrival SoC is the SoC now.
+    assert forecast.on_request(r.advice_ctx, 30.0, None, evening)["soc_arrival"] == 30.0
+
+
+def test_the_charge_starts_no_earlier_than_the_request():
+    r = driven()
+    plan(r, UTC, ms(at(date(2026, 2, 2), 20)), 60.0, KPP, set())
+    late = at(date(2026, 2, 3), 1)  # back home after midnight: 5 h left in the zone
+    a = forecast.on_request(r.advice_ctx, 10.0, 0.0, late)
+    assert a["level"] == "mid" and a["start"] >= late.isoformat()
+
+
+def test_a_second_return_home_gives_a_new_answer():
+    r = driven()
+    plan(r, UTC, ms(at(date(2026, 2, 2), 18)), 60.0, KPP, set())
+    first = forecast.on_request(r.advice_ctx, 40.0, 5.0, at(date(2026, 2, 2), 18))
+    # He goes out again: a 12 kWh, 40 km trip today. The next recompute counts it.
+    t0 = ms(at(date(2026, 2, 2), 19))
+    r.trips.append(Trip(start=t0, end=t0 + 3_600_000, kwh=12.0, km=40.0))
+    later = at(date(2026, 2, 2), 21, 30)
+    plan(r, UTC, ms(later), 25.0, KPP, set())
+    second = forecast.on_request(r.advice_ctx, 25.0, 5.0, later)
+    kpk = (28 * 5.0 + 12.0) / (28 * 25.0 + 40.0)
+    assert second["soc_arrival"] == round(25.0 - 5.0 * 1.3 * kpk / KPP, 1)
+    assert first["level"] is None  # 35.7 % at home is enough
+    assert (second["level"], second["start"]) == ("low", at(date(2026, 2, 3), 1, 15).isoformat())
+    assert second["computed_at"] == later.isoformat() != first["computed_at"]
+
+
+def test_api_on_request(client, advice):
+    assert client.get("/advice?soc=30&km_home=10").status_code == 404
+    r = driven()
+    advice["value"] = plan(r, UTC, ms(at(date(2026, 2, 2), 20)), 60.0, KPP, set())
+    advice["ctx"] = r.advice_ctx
+    plain = client.get("/advice").json()  # without parameters: as before
+    assert plain["message"] == advice["value"]["message"] and plain["soc_now"] == 60.0
+    assert plain["soc_arrival"] is None and plain["computed_at"] is None
+    got = client.get("/advice?soc=30&km_home=10")  # checked against docs/openapi.json
+    assert got.status_code == 200
+    assert got.json()["soc_arrival"] == 21.3 and got.json()["computed_at"]
+    assert client.get("/advice?soc=101").status_code == 422
+    assert client.get("/advice?km_home=-1").status_code == 422
+    assert client.get("/advice?km_home=0").json()["soc_arrival"] == 60.0

@@ -31,6 +31,8 @@ MIN_GAIN = 0.015  # a key is added only if it lowers the normal-day error by thi
 # The car's AC levels: (name, meter kW, battery kW), measured 2024-11 → 2026-10.
 LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
 LEVEL_BG = {"low": "ниско", "mid": "средно", "high": "високо"}
+DETOUR = 1.3  # road km per km in a straight line, for km_home (#27)
+DEFAULT_KWH_PER_KM = 0.18  # when the recent trips give no kWh per km
 
 
 def day_type(d: date, holidays: set[date], ranges=()) -> str:
@@ -346,9 +348,16 @@ def advise(
     return Advice(min(reach, 100), name, z0.astimezone(tz), end.astimezone(tz), capped=True)
 
 
-def message(f: Forecast, soc_now: float, a: Advice, preheat_off: bool) -> str:
-    """The evening message, in Bulgarian."""
-    s = f"Утре: около {f.normal_kwh:.0f} kWh (лош ден {f.bad_kwh:.0f}). Сега {soc_now:.0f} %."
+def message(
+    f: Forecast, soc_now: float, a: Advice, preheat_off: bool, arrival: bool = False
+) -> str:
+    """The evening message, in Bulgarian. arrival: soc_now is the SoC at
+    arrival home (#27)."""
+    s = f"Утре: около {f.normal_kwh:.0f} kWh (лош ден {f.bad_kwh:.0f})."
+    if arrival:
+        s = f"При пристигане около {soc_now:.0f} %. " + s
+    else:
+        s += f" Сега {soc_now:.0f} %."
     if a.level is None:
         s += " Не е нужно зареждане тази вечер."
     else:
@@ -427,7 +436,7 @@ def plan(
     zone = night_zone(day - timedelta(days=1), tz)
     a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min)
     preheat_off = preheat and f.day_type == "holiday"
-    return {
+    out = {
         "day": day.isoformat(),
         "day_type": f.day_type,
         "normal_kwh": round(f.normal_kwh, 1),
@@ -446,4 +455,58 @@ def plan(
             for k, v, e in zip(keys, m.values(day, f.day_type), effects, strict=True)
         ],
         "score": score(r.forecasts),
+    }
+    r.advice_ctx = {
+        "advice": out,
+        "forecast": f,
+        "zone": zone,
+        "departure": dep,
+        "kwh_per_pct": kwh_per_pct,
+        "reserve_pct": reserve_pct,
+        "step_min": step_min,
+        "kwh_per_km": kwh_per_km(r, now),
+    }
+    return out
+
+
+def kwh_per_km(r: Result, now: int, days: int = POOL_DAYS) -> float:
+    """Battery kWh per km of the trips in the last days (journeys marked
+    "not me" are left out); DEFAULT_KWH_PER_KM when they have no km."""
+    skip = {id(t) for j in r.journeys if j.not_me for t in j.trips}
+    since = now - days * 86_400_000
+    ts = [t for t in r.trips if id(t) not in skip and t.start >= since and t.km and t.kwh]
+    km = sum(t.km for t in ts)
+    return sum(t.kwh for t in ts) / km if km else DEFAULT_KWH_PER_KM
+
+
+def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetime) -> dict:
+    """The advice of the last recompute, made again for the SoC at arrival
+    home and for now (#27). Cheap: the forecast is not made again."""
+    base = ctx["advice"]
+    soc = base["soc_now"] if soc is None else soc
+    kpp = ctx["kwh_per_pct"]
+    used = (km_home or 0.0) * DETOUR * ctx["kwh_per_km"]
+    arrival = max(soc - used / kpp, 0.0)
+    f = ctx["forecast"]
+    a = advise(
+        arrival,
+        f.bad_kwh,
+        kpp,
+        ctx["zone"],
+        ctx["departure"],
+        ctx["reserve_pct"],
+        now,
+        ctx["step_min"],
+    )
+    return {
+        **base,
+        "soc_now": round(soc, 1),
+        "soc_arrival": round(arrival, 1),
+        "computed_at": now.isoformat(),
+        "target": a.target,
+        "level": a.level,
+        "start": a.start.isoformat() if a.start else None,
+        "end": a.end.isoformat() if a.end else None,
+        "capped": a.capped,
+        "message": message(f, arrival, a, base["preheat_off"], arrival=True),
     }

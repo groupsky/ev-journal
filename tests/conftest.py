@@ -82,7 +82,7 @@ def journeys():
 
 @pytest.fixture
 def advice():
-    return {"value": None}
+    return {"value": None, "ctx": None}
 
 
 @pytest.fixture
@@ -94,6 +94,7 @@ def client(data_dir, stops, journeys, advice):
         lambda: stops,
         lambda: journeys,
         lambda: advice["value"],
+        lambda: advice["ctx"],
     )
     c = CheckedClient(app)
     c.headers["Authorization"] = f"Bearer {TOKEN}"
