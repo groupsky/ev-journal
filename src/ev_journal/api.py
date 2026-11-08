@@ -178,6 +178,20 @@ class ChargePrice(BaseModel):
     cost_eur: float | None
 
 
+class EstimateStation(BaseModel):
+    id: str
+    name: str
+    max_power_kw: float | None
+
+
+class PriceEstimate(BaseModel):
+    station: EstimateStation | None = Field(description="The nearest station within 75 m.")
+    match: Literal["ok", "unsure", "no station"]
+    eur_per_battery_kwh: float | None
+    source: Literal["last_receipt", "feed"] | None
+    loss_ratio: float = Field(description="Network kWh per battery kWh.")
+
+
 class Question(BaseModel):
     id: int = Field(description="The charge id (its start, ms).")
     date: str = Field(description="Local date of the charge.")
@@ -524,6 +538,16 @@ def create_app(
             )
             charges.price(conn, charge_id)
         return charge_price(conn, charge_id)
+
+    @r.get("/charges/price-estimate", response_model=PriceEstimate)
+    def price_estimate(
+        lat: float = Query(ge=-90, le=90),
+        lon: float = Query(ge=-180, le=180),
+        kind: Literal["dc", "ac"] = Query(),
+        conn=Depends(db),
+    ):
+        """The price per battery kWh for a charge here, for the car app's charge screen."""
+        return charges.estimate_at(conn, (lat, lon), kind)
 
     @r.get("/questions", response_model=list[Question])
     def list_questions(conn=Depends(db)):

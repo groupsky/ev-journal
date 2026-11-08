@@ -260,3 +260,44 @@ def test_question_answered_once_through_the_api(client, data_dir):
         == 404
     )
     assert client.post("/questions/1/answer", json={"text": "1 1"}).status_code == 404
+
+
+def test_price_estimate_at_a_position(client, data_dir):
+    db = places.open_store(data_dir)
+    charges.update_stations(db, data_dir / "f.geojson", 0, Feed())
+    w = week()
+    r = build(w.trips, w.charges, w.fixes, PLACES, UTC)
+    charges.sync(db, r, PLACES, max(c.end for c in r.charges) + 2 * DAY)
+
+    def ask(lat, lon, kind):
+        return client.get(
+            "/charges/price-estimate", params={"lat": lat, "lon": lon, "kind": kind}
+        ).json()
+
+    # Only the feed price: DC is the high end × the loss ratio.
+    got = ask(0.5001, 0.5, "dc")
+    assert got["station"] == {"id": "fines:1", "name": "Test DC", "max_power_kw": 50}
+    assert (got["match"], got["source"]) == ("ok", "feed")
+    assert got["eur_per_battery_kwh"] == pytest.approx(0.50 * charges.DEFAULT_LOSS)
+    assert got["loss_ratio"] == charges.DEFAULT_LOSS
+    # Two stations within 75 m: the nearest, unsure. AC is the low end.
+    got = ask(0.7, -0.2, "ac")
+    assert (got["station"]["id"], got["match"], got["source"]) == ("fines:2", "unsure", "feed")
+    assert got["eur_per_battery_kwh"] == pytest.approx(0.30 * charges.DEFAULT_LOSS)
+    # No station within 75 m.
+    got = ask(0.1, 0.1, "dc")
+    assert got == {
+        "station": None,
+        "match": "no station",
+        "eur_per_battery_kwh": None,
+        "source": None,
+        "loss_ratio": charges.DEFAULT_LOSS,
+    }
+    # A receipt at the station: its price wins, and it teaches the loss ratio.
+    dc = sorted(r.charges, key=lambda c: c.start)[1]
+    client.post(f"/charges/{dc.start}/receipt", json={"amount_eur": 16.5, "network_kwh": 36.0})
+    got = ask(0.5, 0.5, "dc")
+    assert got["source"] == "last_receipt"
+    assert got["eur_per_battery_kwh"] == pytest.approx(16.5 / 30.0)
+    assert got["loss_ratio"] == pytest.approx(36.0 / 30.0)
+    assert client.get("/charges/price-estimate", params={"lat": 0, "lon": 0}).status_code == 422
