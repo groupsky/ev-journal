@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from ev_journal.geo import thin
 from ev_journal.influx import line
-from ev_journal.journeys import Month, Result
+from ev_journal.journeys import Journey, Month, Result
 from ev_journal.overview import overview
 
 TRACK_STEP_M = 50.0
@@ -136,29 +136,30 @@ def _iso(t: int) -> str:
     return datetime.fromtimestamp(t / 1000, UTC).isoformat().replace("+00:00", "Z")
 
 
+def journey_item(j: Journey) -> dict:
+    """One journey as in the MQTT summary and GET /journeys."""
+    return {
+        "id": j.id,
+        "start": _iso(j.start),
+        "end": _iso(j.end),
+        "from": j.start_place.name if j.start_place else None,
+        "to": j.end_place.name if j.end_place else None,
+        "label": j.label,
+        "not_me": j.not_me,
+        "km": round(j.km, 1),
+        "kwh_used": round(j.kwh_used, 2),
+        "drive_min": round(j.drive_min),
+        "waiting_min": round(j.waiting_min),
+        "charge_min": round(j.charge_min),
+        "charges": len(j.charges),
+        "kwh_charged": round(j.kwh_charged, 2),
+        "cost_eur": _r(j.cost_eur, 2),
+    }
+
+
 def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
     """The retained MQTT summary: the last 10 journeys and the current month."""
-    last = []
-    for j in reversed(r.journeys[-10:]):
-        last.append(
-            {
-                "id": j.id,
-                "start": _iso(j.start),
-                "end": _iso(j.end),
-                "from": j.start_place.name if j.start_place else None,
-                "to": j.end_place.name if j.end_place else None,
-                "label": j.label,
-                "not_me": j.not_me,
-                "km": round(j.km, 1),
-                "kwh_used": round(j.kwh_used, 2),
-                "drive_min": round(j.drive_min),
-                "waiting_min": round(j.waiting_min),
-                "charge_min": round(j.charge_min),
-                "charges": len(j.charges),
-                "kwh_charged": round(j.kwh_charged, 2),
-                "cost_eur": _r(j.cost_eur, 2),
-            }
-        )
+    last = [journey_item(j) for j in reversed(r.journeys[-10:])]
     key = datetime.fromtimestamp(now / 1000, tz).strftime("%Y-%m")
     m = next((m for m in r.months if m.key == key), None) or Month(start=0, key=key)
     month = {

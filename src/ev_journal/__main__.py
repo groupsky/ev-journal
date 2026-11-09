@@ -189,6 +189,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["advice"],
         lambda: state["advice_ctx"],
         lambda jid: journey_track(s, state["fixes"], jid),
+        lambda: state["journey_items"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -328,7 +329,14 @@ def main() -> None:
     elif cmd == "run":
         run(s)
     elif cmd == "loop":
-        state = {"stops": [], "journeys": [], "advice": None, "advice_ctx": None, "fixes": {}}
+        state = {
+            "stops": [],
+            "journeys": [],
+            "advice": None,
+            "advice_ctx": None,
+            "fixes": {},
+            "journey_items": [],
+        }
         if s.api_token:
             serve_api(s, state)
         while True:
@@ -339,6 +347,7 @@ def main() -> None:
                 state["advice"] = r.advice
                 state["advice_ctx"] = r.advice_ctx
                 state["fixes"] = journey_fixes(r)
+                state["journey_items"] = [outputs.journey_item(j) for j in r.journeys]
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
             time.sleep(s.interval_sec)
