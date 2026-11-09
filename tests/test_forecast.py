@@ -62,7 +62,7 @@ def test_no_charge_needed():
     assert a.level is None and a.target == 30
     f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
     assert message(f, 55, a, False) == (
-        "Утре: около 4 kWh (лош ден 6). Сега 55 %. Не е нужно зареждане тази вечер."
+        "Утре: около 4 kWh (лош ден 6). Сега 57 % на екрана. Не е нужно зареждане тази вечер."
     )
 
 
@@ -70,7 +70,8 @@ def test_message_with_a_charge():
     f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
     a = advise(20, 6.0, KPP, WINTER, None, 10)
     assert message(f, 20, a, False) == (
-        "Утре: около 4 kWh (лош ден 6). Сега 20 %. Нужни 30 % при тръгване."
+        "Утре: около 4 kWh (лош ден 6). Сега 20 % на екрана."
+        " Нужни 30 % на екрана при тръгване."
         " Задай: ниско, 02:30–06:00."
     )
 
@@ -441,7 +442,7 @@ def test_advice_on_request_for_the_arrival_soc():
     # The bad day is 7 kWh = 23.3 % + 10 % reserve: 35 %. 13.7 % = 4.1 kWh, 4.5 h at low.
     assert (a["target"], a["level"]) == (35, "low")
     assert a["start"] == at(date(2026, 2, 3), 1, 30).isoformat()
-    assert a["message"].startswith("При пристигане около 21 %. Утре:")
+    assert a["message"].startswith("При пристигане около 21 % на екрана. Утре:")
     assert "Сега" not in a["message"]
     # Without km_home the arrival SoC is the SoC now.
     assert forecast.on_request(r.advice_ctx, 30.0, None, evening)["soc_arrival"] == 30.0
@@ -514,3 +515,21 @@ def test_the_night_of_2026_11_08():
     assert a.end == at(date(2026, 11, 9), 6)
     mid_kw = dict((n, kw) for n, _m, kw in lv)["mid"]
     assert 38.5 + 7.25 * mid_kw / 0.31 >= 80
+
+
+def test_the_message_gives_the_car_screen_percent():
+    # BMS 38.5 % was 39.5 % on the screen, and 84.5 % was 88.5 % (#36).
+    assert forecast.on_screen(38.5) == pytest.approx(39.5, abs=0.05)
+    assert forecast.on_screen(84.5) == pytest.approx(88.5, abs=0.05)
+    zone = night_zone(date(2026, 11, 8), UTC)
+    a = advise(38.5, 70 * 0.31, 0.31, zone, None, 10)
+    f = forecast.Forecast(date(2026, 11, 9), "workday", 10.0, 21.7)
+    assert "Сега 40 % на екрана. Нужни 84 % на екрана при тръгване." in message(f, 38.5, a, False)
+
+
+def test_the_screen_map_is_learned_from_pairs():
+    pairs = [(x, 2 + 1.05 * x) for x in range(20, 90, 2)]
+    a, b = forecast.display_map(pairs)
+    assert (a, b) == (pytest.approx(2), pytest.approx(1.05))
+    assert forecast.display_map(pairs[:5]) == forecast.DISPLAY
+    assert forecast.display_map([(50, 52)] * 30) == forecast.DISPLAY

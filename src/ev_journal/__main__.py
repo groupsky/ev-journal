@@ -75,6 +75,7 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
         s.day_ranges,
         s.timer_step_min,
         r.levels or forecast.LEVELS,
+        forecast.display_map(source.soc_pairs(db, now - 90 * 86_400_000)),
     )
 
 

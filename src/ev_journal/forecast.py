@@ -33,6 +33,10 @@ MIN_GAIN = 0.015  # a key is added only if it lowers the normal-day error by thi
 LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
 MIN_LEVEL_CHARGES = 2  # a level is learned from this many home charges at it
 MIN_LEVEL_HOURS = 1.0  # only charges with at least this much time at power teach a level
+# The car screen shows a display % that is not the BMS %: display = a + b × BMS.
+# The default is the line through 38.5 → 39.5 and 84.5 → 88.5 (2026-11-08/09, #36).
+DISPLAY = (-1.51, 49 / 46)
+MIN_DISPLAY_PAIRS = 20
 LEVEL_BG = {"low": "ниско", "mid": "средно", "high": "високо"}
 DETOUR = 1.3  # road km per km in a straight line, for km_home (#27)
 DEFAULT_KWH_PER_KM = 0.18  # when the recent trips give no kWh per km
@@ -57,6 +61,25 @@ def levels(hc) -> list[tuple[str, float, float]]:
         else (name, meter_kw, kw)
         for name, meter_kw, kw in LEVELS
     ]
+
+
+def display_map(pairs: list[tuple[float, float]]) -> tuple[float, float]:
+    """(a, b) of display % = a + b × BMS %, a least-squares line through
+    (BMS %, display %) pairs; DISPLAY with too few pairs or one BMS % only."""
+    if len(pairs) < MIN_DISPLAY_PAIRS:
+        return DISPLAY
+    mx = statistics.fmean(x for x, _ in pairs)
+    my = statistics.fmean(y for _, y in pairs)
+    sxx = sum((x - mx) ** 2 for x, _ in pairs)
+    if sxx <= 0:
+        return DISPLAY
+    b = sum((x - mx) * (y - my) for x, y in pairs) / sxx
+    return my - b * mx, b
+
+
+def on_screen(soc: float, disp: tuple[float, float] = DISPLAY) -> float:
+    """The BMS % as the car screen shows it."""
+    return min(max(disp[0] + disp[1] * soc, 0.0), 100.0)
 
 
 def day_type(d: date, holidays: set[date], ranges=()) -> str:
@@ -374,20 +397,27 @@ def advise(
 
 
 def message(
-    f: Forecast, soc_now: float, a: Advice, preheat_off: bool, arrival: bool = False
+    f: Forecast,
+    soc_now: float,
+    a: Advice,
+    preheat_off: bool,
+    arrival: bool = False,
+    disp: tuple[float, float] = DISPLAY,
 ) -> str:
     """The evening message, in Bulgarian. arrival: soc_now is the SoC at
-    arrival home (#27)."""
+    arrival home (#27). The % are BMS %, shown as the car screen shows them
+    (#36)."""
+    now = on_screen(soc_now, disp)
     s = f"Утре: около {f.normal_kwh:.0f} kWh (лош ден {f.bad_kwh:.0f})."
     if arrival:
-        s = f"При пристигане около {soc_now:.0f} %. " + s
+        s = f"При пристигане около {now:.0f} % на екрана. " + s
     else:
-        s += f" Сега {soc_now:.0f} %."
+        s += f" Сега {now:.0f} % на екрана."
     if a.level is None:
         s += " Не е нужно зареждане тази вечер."
     else:
         s += (
-            f" Нужни {a.target:.0f} % при тръгване."
+            f" Нужни {on_screen(a.target, disp):.0f} % на екрана при тръгване."
             f" Задай: {LEVEL_BG[a.level]}, {a.start:%H:%M}–{a.end:%H:%M}."
         )
         if a.capped:
@@ -421,6 +451,7 @@ def plan(
     ranges=(),
     step_min: int = STEP_MIN,
     levels=LEVELS,
+    disp: tuple[float, float] = DISPLAY,
 ) -> dict | None:
     """Fill r.forecasts (the scored last days) and return the advice for the
     next morning: tomorrow in the evening, today after midnight.
@@ -475,7 +506,7 @@ def plan(
         "departure": dep.isoformat() if dep else None,
         "capped": a.capped,
         "preheat_off": preheat_off,
-        "message": message(f, soc_now, a, preheat_off),
+        "message": message(f, soc_now, a, preheat_off, disp=disp),
         "effects": [
             {"key": k, "value": v[1], "effect_kwh": round(e, 1)}
             for k, v, e in zip(keys, m.values(day, f.day_type), effects, strict=True)
@@ -491,6 +522,7 @@ def plan(
         "reserve_pct": reserve_pct,
         "step_min": step_min,
         "levels": levels,
+        "disp": disp,
         "kwh_per_km": kwh_per_km(r, now),
     }
     return out
@@ -536,5 +568,7 @@ def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetim
         "start": a.start.isoformat() if a.start else None,
         "end": a.end.isoformat() if a.end else None,
         "capped": a.capped,
-        "message": message(f, arrival, a, base["preheat_off"], arrival=True),
+        "message": message(
+            f, arrival, a, base["preheat_off"], arrival=True, disp=ctx.get("disp", DISPLAY)
+        ),
     }
