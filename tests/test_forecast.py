@@ -7,6 +7,7 @@ import pytest
 
 from ev_journal import forecast
 from ev_journal.forecast import advise, backtest, day_type, message, night_zone, plan
+from ev_journal.homecharge import HomeCharge
 from ev_journal.journeys import Journey, Result, Trip
 
 UTC = ZoneInfo("UTC")
@@ -485,3 +486,31 @@ def test_api_on_request(client, advice):
     assert client.get("/advice?soc=101").status_code == 422
     assert client.get("/advice?km_home=-1").status_code == 422
     assert client.get("/advice?km_home=0").json()["soc_arrival"] == 60.0
+
+
+def _night(meter_kwh, battery_kwh, hours):
+    return HomeCharge(0, meter_kwh, battery_kwh, 30, 30 + battery_kwh / 0.31, "", hours)
+
+
+def test_levels_are_learned_from_home_charges():
+    # Two whole 8 h nights at mid: 14.3 kWh into the battery = 1.79 kW (#36).
+    hc = [_night(15.4, 14.3, 8.0), _night(15.5, 14.3, 8.0), _night(9.8, 7.4, 8.0)]
+    lv = dict((name, kw) for name, _m, kw in forecast.levels(hc))
+    assert lv["mid"] == pytest.approx(1.79, abs=0.01)
+    # One charge is not enough: low keeps its default; high has none.
+    assert lv["low"] == 0.92 and lv["high"] == 2.34
+    # Short charges teach nothing.
+    assert forecast.levels([_night(1.9, 1.5, 0.5)] * 3) == forecast.LEVELS
+
+
+def test_the_night_of_2026_11_08():
+    # Mid, 38.5 % → 80 %, 0.31 kWh per %: 41.5 % = 12.9 kWh, 7.2 h at 1.79 kW.
+    # The timer must run 7 h 15 min (22:00–05:15 or 22:45–06:00), not 8 h.
+    lv = forecast.levels([_night(15.4, 14.3, 8.0)] * 2)
+    zone = night_zone(date(2026, 11, 8), UTC)
+    a = advise(38.5, 70 * 0.31, 0.31, zone, None, 10, levels=lv)
+    assert (a.target, a.level) == (80, "mid")
+    assert a.end - a.start == timedelta(hours=7, minutes=15)
+    assert a.end == at(date(2026, 11, 9), 6)
+    mid_kw = dict((n, kw) for n, _m, kw in lv)["mid"]
+    assert 38.5 + 7.25 * mid_kw / 0.31 >= 80

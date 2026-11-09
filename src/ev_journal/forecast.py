@@ -29,10 +29,34 @@ NOISE_Z = 2.0  # a key value's effect counts only if its median is this many sta
 MIN_GAIN = 0.015  # a key is added only if it lowers the normal-day error by this share
 
 # The car's AC levels: (name, meter kW, battery kW), measured 2024-11 → 2026-10.
+# The defaults until the home charges teach better ones (levels(), #36).
 LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
+MIN_LEVEL_CHARGES = 2  # a level is learned from this many home charges at it
+MIN_LEVEL_HOURS = 1.0  # only charges with at least this much time at power teach a level
 LEVEL_BG = {"low": "ниско", "mid": "средно", "high": "високо"}
 DETOUR = 1.3  # road km per km in a straight line, for km_home (#27)
 DEFAULT_KWH_PER_KM = 0.18  # when the recent trips give no kWh per km
+
+
+def levels(hc) -> list[tuple[str, float, float]]:
+    """LEVELS with the battery kW learned from home charges (homecharge.HomeCharge).
+
+    A charge belongs to the level whose meter kW is nearest to its meter kWh
+    per hour. Its battery kW is battery kWh per hour at power. A level takes
+    the median of its charges; with too few it keeps the default."""
+    by: dict[str, list[float]] = {}
+    for c in hc:
+        if c.hours < MIN_LEVEL_HOURS or not c.battery_kwh:
+            continue
+        kw = c.meter_kwh / c.hours
+        name = min(LEVELS, key=lambda lv: abs(lv[1] - kw))[0]
+        by.setdefault(name, []).append(c.battery_kwh / c.hours)
+    return [
+        (name, meter_kw, statistics.median(by[name]))
+        if len(by.get(name, ())) >= MIN_LEVEL_CHARGES
+        else (name, meter_kw, kw)
+        for name, meter_kw, kw in LEVELS
+    ]
 
 
 def day_type(d: date, holidays: set[date], ranges=()) -> str:
@@ -322,6 +346,7 @@ def advise(
     reserve_pct: float,
     now: datetime | None = None,
     step_min: int = STEP_MIN,
+    levels=LEVELS,
 ) -> Advice:
     """The lowest level that reaches the target inside the night zone, ending
     as close to departure as the zone allows. The charge starts no earlier
@@ -337,13 +362,13 @@ def advise(
     dep = departure.astimezone(UTC) if departure is not None else None
     end = dep if dep is not None and z0 < dep < z1 else z1
     window_min = max((end - z0).total_seconds() / 60, 0)
-    for name, _meter_kw, kw in LEVELS:
+    for name, _meter_kw, kw in levels:
         minutes = (target - soc_now) * kwh_per_pct / kw * 60
         minutes = math.ceil(minutes / step_min) * step_min
         if minutes <= window_min:
             start = end - timedelta(minutes=minutes)
             return Advice(target, name, start.astimezone(tz), end.astimezone(tz))
-    name, _meter_kw, kw = LEVELS[-1]
+    name, _meter_kw, kw = levels[-1]
     reach = math.floor(soc_now + window_min / 60 * kw / kwh_per_pct)
     return Advice(min(reach, 100), name, z0.astimezone(tz), end.astimezone(tz), capped=True)
 
@@ -395,6 +420,7 @@ def plan(
     departures: dict[str, str | None] | None = None,
     ranges=(),
     step_min: int = STEP_MIN,
+    levels=LEVELS,
 ) -> dict | None:
     """Fill r.forecasts (the scored last days) and return the advice for the
     next morning: tomorrow in the evening, today after midnight.
@@ -434,7 +460,7 @@ def plan(
     hhmm = (departures or {}).get(f.day_type, departure)
     dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None
     zone = night_zone(day - timedelta(days=1), tz)
-    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min)
+    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min, levels)
     preheat_off = preheat and f.day_type == "holiday"
     out = {
         "day": day.isoformat(),
@@ -464,6 +490,7 @@ def plan(
         "kwh_per_pct": kwh_per_pct,
         "reserve_pct": reserve_pct,
         "step_min": step_min,
+        "levels": levels,
         "kwh_per_km": kwh_per_km(r, now),
     }
     return out
@@ -497,6 +524,7 @@ def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetim
         ctx["reserve_pct"],
         now,
         ctx["step_min"],
+        ctx.get("levels", LEVELS),
     )
     return {
         **base,

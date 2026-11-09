@@ -74,6 +74,7 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
         s.departures,
         s.day_ranges,
         s.timer_step_min,
+        r.levels or forecast.LEVELS,
     )
 
 
@@ -86,15 +87,23 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
         if not at_home or not c.kwh or c.soc_start is None or c.soc_end is None:
             continue
         bs = homecharge.blocks(source.meter_minutes(db, c.start - 5 * 60_000, c.end))
-        meter, _pre = homecharge.split([b for b in bs if b.end >= c.start])
+        bs = [b for b in bs if b.end >= c.start]
+        meter, _pre = homecharge.split(bs)
         if meter > 0:
             hc.append(
                 homecharge.HomeCharge(
-                    c.start, meter, c.kwh, c.soc_start, c.soc_end, month_key(c.start, tz)[0]
+                    c.start,
+                    meter,
+                    c.kwh,
+                    c.soc_start,
+                    c.soc_end,
+                    month_key(c.start, tz)[0],
+                    homecharge.charging_hours(bs),
                 )
             )
     r.backtest = homecharge.backtest(hc)
     r.soc_model = homecharge.fit(hc)
+    r.levels = forecast.levels(hc)
     months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
     for m in r.months:
         if mm := months.get(m.key):
@@ -288,6 +297,10 @@ def dry_run(s: Settings) -> None:
                     f"  {t['key']} = {t['value']} ({t['kind']}):"
                     f" {t['effect_kwh']:+.1f} kWh (n = {t['n']})"
                 )
+    print(
+        "battery kW per level: "
+        + ", ".join(f"{name} {kw:.2f}" for name, _m, kw in r.levels or forecast.LEVELS)
+    )
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"

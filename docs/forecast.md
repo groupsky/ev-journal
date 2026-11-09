@@ -167,8 +167,15 @@ Left out for now:
   Bad values (a bad time, an unknown type, a range named like a built-in
   type, a timer step of 0) stop the start-up, so they are found at once.
 - **Level**: the lowest of the car's three AC levels that reaches the target
-  in time. Battery side 0.92 / 1.60 / 2.34 kW (low / mid / high; 1.22 /
-  1.93 / 2.64 kW at the house meter, 661 sessions). The time is rounded up to
+  in time. The battery kW of each level is learned from the home charges
+  ([#36](https://github.com/groupsky/ev-journal/issues/36)): a charge with at
+  least 1 h at power belongs to the level whose house-meter kW (1.22 / 1.93 /
+  2.64) is nearest to its meter kWh per hour at power; its battery kW is
+  battery kWh per hour at power; a level takes the median of its charges.
+  With fewer than 2 charges a level keeps its default: 0.92 / 1.60 / 2.34 kW
+  battery side (low / mid / high, 661 sessions). The default for mid was
+  too low: one 8 h night at mid put 1.79 kW into the battery. `dry-run`
+  prints the learned kW. The time is rounded up to
   the step of the car's charge timer (`EVJ_TIMER_STEP_MIN`, 15 min). The
   start is the end less that time.
 - When even the high level cannot reach the target inside the zone, the

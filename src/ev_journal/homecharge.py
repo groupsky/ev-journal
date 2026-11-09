@@ -54,9 +54,19 @@ def blocks(minutes: list[tuple[int, float | None, float | None]]) -> list[Block]
     return out
 
 
+def _preheat(bs: list[Block]) -> list[bool]:
+    return [i > 0 and b.end - b.start + MIN <= PREHEAT_MAX_MS for i, b in enumerate(bs)]
+
+
+def charging_hours(bs: list[Block]) -> float:
+    """Hours with power in the charging blocks (preheat left out)."""
+    pre = _preheat(bs)
+    return sum((b.end - b.start + MIN) / 3_600_000 for b, p in zip(bs, pre, strict=True) if not p)
+
+
 def split(bs: list[Block]) -> tuple[float, float]:
     """(charging kWh, preheat kWh). A block after the first, 40 min or shorter, is preheat."""
-    pre = [i > 0 and b.end - b.start + MIN <= PREHEAT_MAX_MS for i, b in enumerate(bs)]
+    pre = _preheat(bs)
     return (
         sum(b.kwh for b, p in zip(bs, pre, strict=True) if not p),
         sum(b.kwh for b, p in zip(bs, pre, strict=True) if p),
@@ -71,6 +81,7 @@ class HomeCharge:
     soc_start: float
     soc_end: float
     month: str = ""
+    hours: float = 0.0  # time with power in the charging blocks (#36)
 
     @property
     def dsoc(self) -> float:
