@@ -175,7 +175,8 @@ Left out for now:
   With fewer than 2 charges a level keeps its default: 0.92 / 1.60 / 2.34 kW
   battery side (low / mid / high, 661 sessions). The default for mid was
   too low: one 8 h night at mid put 1.79 kW into the battery. `dry-run`
-  prints the learned kW. The time is rounded up to
+  prints the learned kW, and the kW per level of each month, so a season
+  or temperature effect shows. No outside temperature is read yet. The time is rounded up to
   the step of the car's charge timer (`EVJ_TIMER_STEP_MIN`, 15 min). The
   start is the end less that time.
 - When even the high level cannot reach the target inside the zone, the

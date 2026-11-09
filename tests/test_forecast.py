@@ -299,12 +299,15 @@ def test_dry_run_prints_every_tried_choice(monkeypatch, capsys, tmp_path):
 
     r = Result(trips=[], journeys=[], outings=[], months=[])
     _picks, r.forecast_tries = forecast.pick(weekday_need(30), set())
+    r.level_months = {"2026-11": forecast.level_rates([_night(15.4, 14.3, 8.0)])}
     monkeypatch.setattr(cli, "compute", lambda s: r)
     monkeypatch.setattr(cli, "away", lambda *a: "-")
     cli.dry_run(SimpleNamespace(data_dir=tmp_path))
     out = capsys.readouterr().out
     assert "workday no key" in out and "weekday" in out and "month_part" in out
     assert out.count("<- picked") == 2
+    assert "battery kW per level: low 0.92, mid 1.60, high 2.34" in out
+    assert "2026-11  mid 1.79 (n = 1)" in out
 
 
 def noisy_need(plant, seed: int = 1, days: int = 730) -> dict[date, float]:

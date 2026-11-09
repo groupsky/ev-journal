@@ -7,6 +7,7 @@ dry-run: read and recompute, print counts per month, write nothing.
 """
 
 import shutil
+import statistics
 import sys
 import tempfile
 import threading
@@ -105,6 +106,9 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
     r.backtest = homecharge.backtest(hc)
     r.soc_model = homecharge.fit(hc)
     r.levels = forecast.levels(hc)
+    for c in hc:
+        r.level_months.setdefault(c.month, []).append(c)
+    r.level_months = {k: forecast.level_rates(v) for k, v in sorted(r.level_months.items())}
     months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
     for m in r.months:
         if mm := months.get(m.key):
@@ -302,6 +306,15 @@ def dry_run(s: Settings) -> None:
         "battery kW per level: "
         + ", ".join(f"{name} {kw:.2f}" for name, _m, kw in r.levels or forecast.LEVELS)
     )
+    for key, by in r.level_months.items():  # to see a season or temperature effect
+        print(
+            f"  {key}  "
+            + ", ".join(
+                f"{name} {statistics.median(by[name]):.2f} (n = {len(by[name])})"
+                for name, _m, _kw in forecast.LEVELS
+                if name in by
+            )
+        )
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"

@@ -42,12 +42,12 @@ DETOUR = 1.3  # road km per km in a straight line, for km_home (#27)
 DEFAULT_KWH_PER_KM = 0.18  # when the recent trips give no kWh per km
 
 
-def levels(hc) -> list[tuple[str, float, float]]:
-    """LEVELS with the battery kW learned from home charges (homecharge.HomeCharge).
+def level_rates(hc) -> dict[str, list[float]]:
+    """Battery kW of the home charges (homecharge.HomeCharge), by level.
 
-    A charge belongs to the level whose meter kW is nearest to its meter kWh
-    per hour. Its battery kW is battery kWh per hour at power. A level takes
-    the median of its charges; with too few it keeps the default."""
+    A charge with at least MIN_LEVEL_HOURS at power belongs to the level
+    whose meter kW is nearest to its meter kWh per hour at power. Its
+    battery kW is battery kWh per hour at power."""
     by: dict[str, list[float]] = {}
     for c in hc:
         if c.hours < MIN_LEVEL_HOURS or not c.battery_kwh:
@@ -55,6 +55,13 @@ def levels(hc) -> list[tuple[str, float, float]]:
         kw = c.meter_kwh / c.hours
         name = min(LEVELS, key=lambda lv: abs(lv[1] - kw))[0]
         by.setdefault(name, []).append(c.battery_kwh / c.hours)
+    return by
+
+
+def levels(hc) -> list[tuple[str, float, float]]:
+    """LEVELS with the battery kW learned from home charges: the median of
+    a level's charges; with too few it keeps the default."""
+    by = level_rates(hc)
     return [
         (name, meter_kw, statistics.median(by[name]))
         if len(by.get(name, ())) >= MIN_LEVEL_CHARGES
