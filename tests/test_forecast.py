@@ -7,6 +7,7 @@ import pytest
 
 from ev_journal import forecast
 from ev_journal.forecast import advise, backtest, day_type, message, night_zone, plan
+from ev_journal.homecharge import HomeCharge
 from ev_journal.journeys import Journey, Result, Trip
 
 UTC = ZoneInfo("UTC")
@@ -61,7 +62,7 @@ def test_no_charge_needed():
     assert a.level is None and a.target == 30
     f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
     assert message(f, 55, a, False) == (
-        "Утре: около 4 kWh (лош ден 6). Сега 55 %. Не е нужно зареждане тази вечер."
+        "Утре: около 4 kWh (лош ден 6). Сега 57 % на екрана. Не е нужно зареждане тази вечер."
     )
 
 
@@ -69,7 +70,8 @@ def test_message_with_a_charge():
     f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
     a = advise(20, 6.0, KPP, WINTER, None, 10)
     assert message(f, 20, a, False) == (
-        "Утре: около 4 kWh (лош ден 6). Сега 20 %. Нужни 30 % при тръгване."
+        "Утре: около 4 kWh (лош ден 6). Сега 20 % на екрана."
+        " Нужни 30 % на екрана при тръгване."
         " Задай: ниско, 02:30–06:00."
     )
 
@@ -297,12 +299,15 @@ def test_dry_run_prints_every_tried_choice(monkeypatch, capsys, tmp_path):
 
     r = Result(trips=[], journeys=[], outings=[], months=[])
     _picks, r.forecast_tries = forecast.pick(weekday_need(30), set())
+    r.level_months = {"2026-11": forecast.level_rates([_night(15.4, 14.3, 8.0)])}
     monkeypatch.setattr(cli, "compute", lambda s: r)
     monkeypatch.setattr(cli, "away", lambda *a: "-")
     cli.dry_run(SimpleNamespace(data_dir=tmp_path))
     out = capsys.readouterr().out
     assert "workday no key" in out and "weekday" in out and "month_part" in out
     assert out.count("<- picked") == 2
+    assert "battery kW per level: low 0.92, mid 1.60, high 2.34" in out
+    assert "2026-11  mid 1.79 (n = 1)" in out
 
 
 def noisy_need(plant, seed: int = 1, days: int = 730) -> dict[date, float]:
@@ -440,7 +445,7 @@ def test_advice_on_request_for_the_arrival_soc():
     # The bad day is 7 kWh = 23.3 % + 10 % reserve: 35 %. 13.7 % = 4.1 kWh, 4.5 h at low.
     assert (a["target"], a["level"]) == (35, "low")
     assert a["start"] == at(date(2026, 2, 3), 1, 30).isoformat()
-    assert a["message"].startswith("При пристигане около 21 %. Утре:")
+    assert a["message"].startswith("При пристигане около 21 % на екрана. Утре:")
     assert "Сега" not in a["message"]
     # Without km_home the arrival SoC is the SoC now.
     assert forecast.on_request(r.advice_ctx, 30.0, None, evening)["soc_arrival"] == 30.0
@@ -485,3 +490,49 @@ def test_api_on_request(client, advice):
     assert client.get("/advice?soc=101").status_code == 422
     assert client.get("/advice?km_home=-1").status_code == 422
     assert client.get("/advice?km_home=0").json()["soc_arrival"] == 60.0
+
+
+def _night(meter_kwh, battery_kwh, hours):
+    return HomeCharge(0, meter_kwh, battery_kwh, 30, 30 + battery_kwh / 0.31, "", hours)
+
+
+def test_levels_are_learned_from_home_charges():
+    # Two whole 8 h nights at mid: 14.3 kWh into the battery = 1.79 kW (#36).
+    hc = [_night(15.4, 14.3, 8.0), _night(15.5, 14.3, 8.0), _night(9.8, 7.4, 8.0)]
+    lv = dict((name, kw) for name, _m, kw in forecast.levels(hc))
+    assert lv["mid"] == pytest.approx(1.79, abs=0.01)
+    # One charge is not enough: low keeps its default; high has none.
+    assert lv["low"] == 0.92 and lv["high"] == 2.34
+    # Short charges teach nothing.
+    assert forecast.levels([_night(1.9, 1.5, 0.5)] * 3) == forecast.LEVELS
+
+
+def test_the_night_of_2026_11_08():
+    # Mid, 38.5 % → 80 %, 0.31 kWh per %: 41.5 % = 12.9 kWh, 7.2 h at 1.79 kW.
+    # The timer must run 7 h 15 min (22:00–05:15 or 22:45–06:00), not 8 h.
+    lv = forecast.levels([_night(15.4, 14.3, 8.0)] * 2)
+    zone = night_zone(date(2026, 11, 8), UTC)
+    a = advise(38.5, 70 * 0.31, 0.31, zone, None, 10, levels=lv)
+    assert (a.target, a.level) == (80, "mid")
+    assert a.end - a.start == timedelta(hours=7, minutes=15)
+    assert a.end == at(date(2026, 11, 9), 6)
+    mid_kw = dict((n, kw) for n, _m, kw in lv)["mid"]
+    assert 38.5 + 7.25 * mid_kw / 0.31 >= 80
+
+
+def test_the_message_gives_the_car_screen_percent():
+    # BMS 38.5 % was 39.5 % on the screen, and 84.5 % was 88.5 % (#36).
+    assert forecast.on_screen(38.5) == pytest.approx(39.5, abs=0.05)
+    assert forecast.on_screen(84.5) == pytest.approx(88.5, abs=0.05)
+    zone = night_zone(date(2026, 11, 8), UTC)
+    a = advise(38.5, 70 * 0.31, 0.31, zone, None, 10)
+    f = forecast.Forecast(date(2026, 11, 9), "workday", 10.0, 21.7)
+    assert "Сега 40 % на екрана. Нужни 84 % на екрана при тръгване." in message(f, 38.5, a, False)
+
+
+def test_the_screen_map_is_learned_from_pairs():
+    pairs = [(x, 2 + 1.05 * x) for x in range(20, 90, 2)]
+    a, b = forecast.display_map(pairs)
+    assert (a, b) == (pytest.approx(2), pytest.approx(1.05))
+    assert forecast.display_map(pairs[:5]) == forecast.DISPLAY
+    assert forecast.display_map([(50 + i % 3, 52 + i % 2) for i in range(30)]) == forecast.DISPLAY

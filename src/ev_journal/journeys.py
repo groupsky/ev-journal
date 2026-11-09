@@ -221,6 +221,8 @@ class Result:
     home_charge: dict | None = None  # the live estimate (homecharge.live)
     backtest: list[float] = field(default_factory=list)  # end SoC errors, %
     soc_model: "object | None" = None  # homecharge.Model of all home charges
+    levels: list | None = None  # forecast.levels(): battery kW per AC level (#36)
+    level_months: dict = field(default_factory=dict)  # month → forecast.level_rates()
     forecasts: list = field(default_factory=list)  # forecast.Forecast, scored days
     forecast_tries: list = field(default_factory=list)  # forecast.pick rows
     forecast_effects: dict = field(default_factory=dict)  # forecast.plan: keys, rows, table

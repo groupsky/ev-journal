@@ -106,3 +106,18 @@ def last_soc(db: Influx, before: int) -> float | None:
         f" AND time >= {before - GPS_WINDOW}ms AND time < {before}ms"
     )
     return _f(rows[0]["last"]) if rows else None
+
+
+def soc_pairs(db: Influx, start: int) -> list[tuple[float, float]]:
+    """(BMS %, car screen %) per hour since start: the last soc of bms/2101
+    and the last soc_display of bms/2105 in the same hour (#36)."""
+
+    def hourly(group: str, field: str) -> dict[int, float]:
+        rows = db.query(
+            f"SELECT last({field}) FROM ioniq WHERE \"group\" = '{group}'"
+            f" AND time >= {start}ms GROUP BY time(1h) fill(none)"
+        )
+        return {int(r["time"]): float(r["last"]) for r in rows if r["last"] is not None}
+
+    bms, screen = hourly("bms/2101", "soc"), hourly("bms/2105", "soc_display")
+    return [(bms[t], screen[t]) for t in sorted(bms.keys() & screen.keys())]

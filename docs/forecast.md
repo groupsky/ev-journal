@@ -167,8 +167,16 @@ Left out for now:
   Bad values (a bad time, an unknown type, a range named like a built-in
   type, a timer step of 0) stop the start-up, so they are found at once.
 - **Level**: the lowest of the car's three AC levels that reaches the target
-  in time. Battery side 0.92 / 1.60 / 2.34 kW (low / mid / high; 1.22 /
-  1.93 / 2.64 kW at the house meter, 661 sessions). The time is rounded up to
+  in time. The battery kW of each level is learned from the home charges
+  ([#36](https://github.com/groupsky/ev-journal/issues/36)): a charge with at
+  least 1 h at power belongs to the level whose house-meter kW (1.22 / 1.93 /
+  2.64) is nearest to its meter kWh per hour at power; its battery kW is
+  battery kWh per hour at power; a level takes the median of its charges.
+  With fewer than 2 charges a level keeps its default: 0.92 / 1.60 / 2.34 kW
+  battery side (low / mid / high, 661 sessions). The default for mid was
+  too low: one 8 h night at mid put 1.79 kW into the battery. `dry-run`
+  prints the learned kW, and the kW per level of each month, so a season
+  or temperature effect shows. No outside temperature is read yet. The time is rounded up to
   the step of the car's charge timer (`EVJ_TIMER_STEP_MIN`, 15 min). The
   start is the end less that time.
 - When even the high level cannot reach the target inside the zone, the
@@ -197,7 +205,7 @@ sees a trip only after it ends, so the client gives what it knows live.
   so today's trips so far count, as in the evening. Only the advice is made
   again: from the arrival SoC, and the charge starts no earlier than now.
   This keeps a request cheap.
-- The message starts with the arrival SoC: "При пристигане около 41 %.
+- The message starts with the arrival SoC: "При пристигане около 41 % на екрана.
   Утре: …".
 - Limits: it gives `404` while there is no cached advice (also when the car's
   SoC was unknown at the last recompute, even if the client sends `soc`). For
@@ -210,8 +218,18 @@ sees a trip only after it ends, so the client gives what it knows live.
 ([outputs.md](outputs.md#mqtt), [api.md](api.md#advice)). The `message` is
 the evening text in Bulgarian, for example:
 
-> Утре: около 7 kWh (лош ден 15). Сега 40 %. Нужни 60 % при тръгване.
+> Утре: около 7 kWh (лош ден 15). Сега 41 % на екрана. Нужни 62 % на екрана при тръгване.
 > Задай: ниско, 00:30–06:00.
 
-or "… Не е нужно зареждане тази вечер." Sending it (Telegram or a Home
+or "… Не е нужно зареждане тази вечер."
+
+The % in the message are as the car screen shows them ("на екрана"); the
+JSON fields (`soc_now`, `target`, …) stay BMS % (`bms/2101 soc`). The screen
+shows a display % (`bms/2105 soc_display`), which is not the BMS %: on
+2026-11-08/09, BMS 38.5 % and 84.5 % were 39.5 % and 88.5 % on the screen
+([#36](https://github.com/groupsky/ev-journal/issues/36)). The map is
+display % = a + b × BMS %, a least-squares line through the hourly pairs of
+the last 90 days (the last `soc` and the last `soc_display` of each hour).
+With fewer than 20 pairs, or pairs that span less than 20 BMS %, it is the line through the two points above
+(a = −1.51, b = 1.065). Sending it (Telegram or a Home
 Assistant notification) is done outside this repo.
