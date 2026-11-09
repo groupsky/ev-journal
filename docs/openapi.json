@@ -925,6 +925,43 @@
         "title": "Suggestion",
         "type": "object"
       },
+      "TrackPoint": {
+        "properties": {
+          "kwh_per_100km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Battery kWh per 100 km of the part since the point before. null for the first point and where the energy counters have a gap.",
+            "title": "Kwh Per 100Km"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "t": {
+            "description": "Time of the GPS fix, ms.",
+            "title": "T",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t",
+          "lat",
+          "lon",
+          "kwh_per_100km"
+        ],
+        "title": "TrackPoint",
+        "type": "object"
+      },
       "Written": {
         "properties": {
           "id": {
@@ -1319,6 +1356,70 @@
           }
         },
         "summary": "Put Label"
+      }
+    },
+    "/journeys/{journey_id}/track": {
+      "get": {
+        "description": "The journey's real GPS fixes, one per 50 m like ev_track, for a map.\n\nThe journey id is its start time (ms).",
+        "operationId": "get_track_journeys__journey_id__track_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "journey_id",
+            "required": true,
+            "schema": {
+              "title": "Journey Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrackPoint"
+                  },
+                  "title": "Response Get Track Journeys  Journey Id  Track Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Track"
       }
     },
     "/places": {

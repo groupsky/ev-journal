@@ -186,3 +186,15 @@ def test_a_place_in_a_route_cannot_be_deleted(client):
 
 def test_bearer_scheme_ignores_case(client):
     assert client.get("/places", headers={"Authorization": f"bearer {TOKEN}"}).status_code == 200
+
+
+def test_journey_track(data_dir):
+    pts = [{"t": 1, "lat": 0.1, "lon": 0.2, "kwh_per_100km": None}]
+    pts.append({"t": 9, "lat": 0.1005, "lon": 0.2, "kwh_per_100km": 14.5})
+    tracks = {7: pts, 8: []}
+    c = CheckedClient(create_app(places.store_path(data_dir), TOKEN, UTC, track=tracks.get))
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    assert c.get("/journeys/7/track").json() == pts
+    assert c.get("/journeys/8/track").json() == []
+    r = c.get("/journeys/9/track")
+    assert r.status_code == 404 and r.json() == {"detail": "no such journey"}

@@ -57,6 +57,15 @@ def fixes(db: Influx, start: int, end: int) -> list[tuple[int, float, float]]:
     return out
 
 
+def counters(db: Influx, start: int, end: int) -> list[tuple[int, float | None, float | None]]:
+    """Battery lifetime counters: (t, cum_out_kwh, cum_in_kwh)."""
+    rows = db.query(
+        "SELECT cum_out_kwh, cum_in_kwh FROM ioniq WHERE \"group\" = 'bms/2101'"
+        f" AND time >= {start}ms AND time <= {end}ms"
+    )
+    return [(int(r["time"]), _f(r["cum_out_kwh"]), _f(r["cum_in_kwh"])) for r in rows]
+
+
 def odometer(db: Influx, start: int, end: int) -> list[tuple[int, float]]:
     """The last odometer reading of each hour."""
     rows = db.query(

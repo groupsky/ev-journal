@@ -192,6 +192,16 @@ class PriceEstimate(BaseModel):
     loss_ratio: float = Field(description="Network kWh per battery kWh.")
 
 
+class TrackPoint(BaseModel):
+    t: int = Field(description="Time of the GPS fix, ms.")
+    lat: float
+    lon: float
+    kwh_per_100km: float | None = Field(
+        description="Battery kWh per 100 km of the part since the point before."
+        " null for the first point and where the energy counters have a gap."
+    )
+
+
 class Question(BaseModel):
     id: int = Field(description="The charge id (its start, ms).")
     date: str = Field(description="Local date of the charge.")
@@ -288,10 +298,12 @@ def create_app(
     journeys: Callable[[], list[tuple[int, int]]] = list,
     advice: Callable[[], dict | None] = lambda: None,
     advice_ctx: Callable[[], dict | None] = lambda: None,
+    track: Callable[[int], list[dict] | None] = lambda _id: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
-    journeys the (start, end) of each journey, advice the last advice and
-    advice_ctx what is needed to make it again on request."""
+    journeys the (start, end) of each journey, advice the last advice,
+    advice_ctx what is needed to make it again on request and track the
+    points of a journey (None for an unknown journey)."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -493,6 +505,17 @@ def create_app(
                 (journey_id, p.label, int(p.not_me), t),
             )
         return Label(journey_id=journey_id, label=p.label, not_me=p.not_me, updated_at=t)
+
+    @r.get("/journeys/{journey_id}/track", response_model=list[TrackPoint], responses=nf)
+    def get_track(journey_id: int):
+        """The journey's real GPS fixes, one per 50 m like ev_track, for a map.
+
+        The journey id is its start time (ms).
+        """
+        pts = track(journey_id)
+        if pts is None:
+            raise Fail(404, "no such journey")
+        return pts
 
     @r.post(
         "/commands",

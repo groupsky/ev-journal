@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from week import PLACES, week
@@ -64,3 +65,18 @@ def test_null_where_the_counters_have_a_gap():
 
 def test_no_fixes_no_points():
     assert journey_track([], [(0, 1.0, 0.0)]) == []
+
+
+def test_main_reads_the_counters_of_the_journey_only(monkeypatch):
+    from ev_journal import __main__ as cli
+
+    r = build(week().trips, week().charges, week().fixes, PLACES, UTC)
+    fixes = cli.journey_fixes(r)
+    j = r.journeys[0]
+    asked = []
+    monkeypatch.setattr(cli.source, "counters", lambda db, a, b: asked.append((a, b)) or [])
+    s = SimpleNamespace(influx_url="", influx_db="", influx_read_user="", influx_read_password="")
+    pts = cli.journey_track(s, fixes, j.id)
+    assert asked == [(j.start, j.end)] and len(pts) > 2
+    assert all(p["kwh_per_100km"] is None for p in pts)
+    assert cli.journey_track(None, fixes, j.id + 1) is None
