@@ -230,6 +230,6 @@ shows a display % (`bms/2105 soc_display`), which is not the BMS %: on
 ([#36](https://github.com/groupsky/ev-journal/issues/36)). The map is
 display % = a + b × BMS %, a least-squares line through the hourly pairs of
 the last 90 days (the last `soc` and the last `soc_display` of each hour).
-With fewer than 20 pairs it is the line through the two points above
+With fewer than 20 pairs, or pairs that span less than 20 BMS %, it is the line through the two points above
 (a = −1.51, b = 1.065). Sending it (Telegram or a Home
 Assistant notification) is done outside this repo.

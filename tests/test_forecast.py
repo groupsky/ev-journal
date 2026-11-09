@@ -535,4 +535,4 @@ def test_the_screen_map_is_learned_from_pairs():
     a, b = forecast.display_map(pairs)
     assert (a, b) == (pytest.approx(2), pytest.approx(1.05))
     assert forecast.display_map(pairs[:5]) == forecast.DISPLAY
-    assert forecast.display_map([(50, 52)] * 30) == forecast.DISPLAY
+    assert forecast.display_map([(50 + i % 3, 52 + i % 2) for i in range(30)]) == forecast.DISPLAY

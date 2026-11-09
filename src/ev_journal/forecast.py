@@ -37,6 +37,7 @@ MIN_LEVEL_HOURS = 1.0  # only charges with at least this much time at power teac
 # The default is the line through 38.5 → 39.5 and 84.5 → 88.5 (2026-11-08/09, #36).
 DISPLAY = (-1.51, 49 / 46)
 MIN_DISPLAY_PAIRS = 20
+MIN_DISPLAY_SPAN = 20.0  # the pairs must span this many BMS %, so the slope is sound
 LEVEL_BG = {"low": "ниско", "mid": "средно", "high": "високо"}
 DETOUR = 1.3  # road km per km in a straight line, for km_home (#27)
 DEFAULT_KWH_PER_KM = 0.18  # when the recent trips give no kWh per km
@@ -72,14 +73,13 @@ def levels(hc) -> list[tuple[str, float, float]]:
 
 def display_map(pairs: list[tuple[float, float]]) -> tuple[float, float]:
     """(a, b) of display % = a + b × BMS %, a least-squares line through
-    (BMS %, display %) pairs; DISPLAY with too few pairs or one BMS % only."""
-    if len(pairs) < MIN_DISPLAY_PAIRS:
+    (BMS %, display %) pairs; DISPLAY with too few pairs or a narrow span."""
+    xs = [x for x, _ in pairs]
+    if len(pairs) < MIN_DISPLAY_PAIRS or max(xs) - min(xs) < MIN_DISPLAY_SPAN:
         return DISPLAY
     mx = statistics.fmean(x for x, _ in pairs)
     my = statistics.fmean(y for _, y in pairs)
     sxx = sum((x - mx) ** 2 for x, _ in pairs)
-    if sxx <= 0:
-        return DISPLAY
     b = sum((x - mx) * (y - my) for x, y in pairs) / sxx
     return my - b * mx, b
 
