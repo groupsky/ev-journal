@@ -202,6 +202,26 @@ class TrackPoint(BaseModel):
     )
 
 
+class JourneyItem(BaseModel):
+    """One journey, the same fields as the items of the MQTT `journeys`."""
+
+    id: int = Field(description="The journey id (its start, ms).")
+    start: str
+    end: str
+    from_: str | None = Field(alias="from")
+    to: str | None
+    label: str | None
+    not_me: bool
+    km: float
+    kwh_used: float
+    drive_min: int
+    waiting_min: int
+    charge_min: int
+    charges: int
+    kwh_charged: float
+    cost_eur: float | None
+
+
 class Question(BaseModel):
     id: int = Field(description="The charge id (its start, ms).")
     date: str = Field(description="Local date of the charge.")
@@ -299,11 +319,13 @@ def create_app(
     advice: Callable[[], dict | None] = lambda: None,
     advice_ctx: Callable[[], dict | None] = lambda: None,
     track: Callable[[int], list[dict] | None] = lambda _id: None,
+    journey_list: Callable[[], list[dict]] = list,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
     advice_ctx what is needed to make it again on request and track the
-    points of a journey (None for an unknown journey)."""
+    points of a journey (None for an unknown journey) and journey_list the
+    journeys of the last recompute as in the MQTT summary, oldest first."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -505,6 +527,18 @@ def create_app(
                 (journey_id, p.label, int(p.not_me), t),
             )
         return Label(journey_id=journey_id, label=p.label, not_me=p.not_me, updated_at=t)
+
+    @r.get("/journeys", response_model=list[JourneyItem])
+    def get_journeys(
+        before: int | None = Query(None, description="Only journeys that start before this, ms."),
+        limit: int = Query(20, ge=1, le=100),
+    ):
+        """Journeys of the last recompute, newest first, for paging back.
+
+        For the next page, pass the id of the last journey as `before`.
+        """
+        items = [j for j in journey_list() if before is None or j["id"] < before]
+        return items[::-1][:limit]
 
     @r.get("/journeys/{journey_id}/track", response_model=list[TrackPoint], responses=nf)
     def get_track(journey_id: int):

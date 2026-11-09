@@ -394,6 +394,119 @@
         "title": "EstimateStation",
         "type": "object"
       },
+      "JourneyItem": {
+        "description": "One journey, the same fields as the items of the MQTT `journeys`.",
+        "properties": {
+          "charge_min": {
+            "title": "Charge Min",
+            "type": "integer"
+          },
+          "charges": {
+            "title": "Charges",
+            "type": "integer"
+          },
+          "cost_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Eur"
+          },
+          "drive_min": {
+            "title": "Drive Min",
+            "type": "integer"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "id": {
+            "description": "The journey id (its start, ms).",
+            "title": "Id",
+            "type": "integer"
+          },
+          "km": {
+            "title": "Km",
+            "type": "number"
+          },
+          "kwh_charged": {
+            "title": "Kwh Charged",
+            "type": "number"
+          },
+          "kwh_used": {
+            "title": "Kwh Used",
+            "type": "number"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "not_me": {
+            "title": "Not Me",
+            "type": "boolean"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "waiting_min": {
+            "title": "Waiting Min",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "start",
+          "end",
+          "from",
+          "to",
+          "label",
+          "not_me",
+          "km",
+          "kwh_used",
+          "drive_min",
+          "waiting_min",
+          "charge_min",
+          "charges",
+          "kwh_charged",
+          "cost_eur"
+        ],
+        "title": "JourneyItem",
+        "type": "object"
+      },
       "Label": {
         "properties": {
           "journey_id": {
@@ -1286,6 +1399,81 @@
           }
         },
         "summary": "Post Command"
+      }
+    },
+    "/journeys": {
+      "get": {
+        "description": "Journeys of the last recompute, newest first, for paging back.\n\nFor the next page, pass the id of the last journey as `before`.",
+        "operationId": "get_journeys_journeys_get",
+        "parameters": [
+          {
+            "description": "Only journeys that start before this, ms.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start before this, ms.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JourneyItem"
+                  },
+                  "title": "Response Get Journeys Journeys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Journeys"
       }
     },
     "/journeys/{journey_id}/label": {

@@ -198,3 +198,27 @@ def test_journey_track(data_dir):
     assert c.get("/journeys/8/track").json() == []
     r = c.get("/journeys/9/track")
     assert r.status_code == 404 and r.json() == {"detail": "no such journey"}
+
+
+def test_journeys_pages_join_without_gap_or_duplicate(data_dir):
+    def item(i):
+        t = 1_000_000 * (i + 1)
+        return {
+            "id": t, "start": f"s{i}", "end": f"e{i}", "from": "Test Bay", "to": None,
+            "label": None, "not_me": False, "km": 1.0, "kwh_used": 0.2, "drive_min": 3,
+            "waiting_min": 0, "charge_min": 0, "charges": 0, "kwh_charged": 0.0, "cost_eur": None,
+        }  # fmt: skip
+
+    items = [item(i) for i in range(25)]  # oldest first
+    c = CheckedClient(
+        create_app(places.store_path(data_dir), TOKEN, UTC, journey_list=lambda: items)
+    )
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    first = c.get("/journeys", params={"limit": 10}).json()
+    assert first[0] == items[-1] and first[0]["from"] == "Test Bay"
+    second = c.get("/journeys", params={"limit": 10, "before": first[-1]["id"]}).json()
+    ids = [j["id"] for j in first + second]
+    assert ids == [j["id"] for j in items[::-1][:20]]
+    assert len(c.get("/journeys").json()) == 20  # the default limit
+    assert c.get("/journeys", params={"before": items[0]["id"]}).json() == []
+    assert c.get("/journeys", params={"limit": 101}).status_code == 422

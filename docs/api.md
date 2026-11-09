@@ -63,6 +63,22 @@ recompute. A time in no journey of the last recompute gets `404` (also before
 the first recompute is done). `null` means "use the computed label". `ev_journeys` then has
 `label_by_hand` and `not_me`.
 
+## Journey list
+
+`GET /journeys?before=<ms>&limit=<n>` gives journeys of the last recompute,
+newest first. Each item has the same fields as the items of `journeys` in the
+retained MQTT summary (`id`, `start`, `end`, `from`, `to`, `label`, `not_me`,
+`km`, `kwh_used`, `drive_min`, `waiting_min`, `charge_min`, `charges`,
+`kwh_charged`, `cost_eur`). The MQTT summary holds only the last 10; this is
+for scrolling further back.
+
+- `before` (optional): only journeys whose id (start, ms) is smaller. Without
+  it, the list starts at the newest journey.
+- `limit`: 1 to 100, default 20.
+- For the next page, pass the `id` of the last item as `before`. The pages
+  then join with no gap and no duplicate. An empty list means no older
+  journeys. Before the first recompute is done, the list is empty.
+
 ## Journey track
 
 `GET /journeys/{id}/track` gives the route of a journey for a map. The id is
