@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import charges, cleanup, forecast, homecharge, outputs, places, price, source
+from ev_journal import charges, cleanup, forecast, homecharge, outputs, places, price, source, track
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build, month_key
 from ev_journal.settings import Settings
@@ -158,6 +158,22 @@ def journey_ends(r: Result) -> list[tuple[int, float, float]]:
     return [(j.end, *j.trips[-1].end_pos) for j in r.journeys if j.trips[-1].end_pos]
 
 
+def journey_fixes(r: Result) -> dict[int, tuple[int, int, list]]:
+    """Per journey id: its start, end and real GPS fixes."""
+    return {j.id: (j.start, j.end, [f for t in j.trips for f in t.fixes]) for j in r.journeys}
+
+
+def journey_track(s: Settings, fixes: dict, journey_id: int) -> list[dict] | None:
+    """The map points of one journey, with the energy counters read now."""
+    if journey_id not in fixes:
+        return None
+    start, end, fx = fixes[journey_id]
+    if not fx:
+        return []
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    return track.journey_track(fx, source.counters(db, start, end))
+
+
 def serve_api(s: Settings, state: dict) -> None:
     import uvicorn
 
@@ -172,6 +188,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["journeys"],
         lambda: state["advice"],
         lambda: state["advice_ctx"],
+        lambda jid: journey_track(s, state["fixes"], jid),
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -311,7 +328,7 @@ def main() -> None:
     elif cmd == "run":
         run(s)
     elif cmd == "loop":
-        state = {"stops": [], "journeys": [], "advice": None, "advice_ctx": None}
+        state = {"stops": [], "journeys": [], "advice": None, "advice_ctx": None, "fixes": {}}
         if s.api_token:
             serve_api(s, state)
         while True:
@@ -321,6 +338,7 @@ def main() -> None:
                 state["journeys"] = [(j.start, j.end) for j in r.journeys]
                 state["advice"] = r.advice
                 state["advice_ctx"] = r.advice_ctx
+                state["fixes"] = journey_fixes(r)
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
             time.sleep(s.interval_sec)

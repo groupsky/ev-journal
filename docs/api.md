@@ -63,6 +63,25 @@ recompute. A time in no journey of the last recompute gets `404` (also before
 the first recompute is done). `null` means "use the computed label". `ev_journeys` then has
 `label_by_hand` and `not_me`.
 
+## Journey track
+
+`GET /journeys/{id}/track` gives the route of a journey for a map. The id is
+the journey's start in ms (as in `ev_journeys`). The answer is a list of
+points `{"t", "lat", "lon", "kwh_per_100km"}`, in time order:
+
+- The points are the journey's real GPS fixes (accuracy 50 m or better),
+  thinned like `ev_track`: a fix is kept when it is 50 m or more from the last
+  kept one, and the last fix is kept too.
+- `kwh_per_100km` is for the part since the point before. It comes from the
+  battery counters (`cum_out_kwh` − `cum_in_kwh`), read from InfluxDB on each
+  request. The counters have 0.1 kWh steps, so the energy is a straight line
+  between the readings where the value changes. A 50 m part then shows the
+  real rate and not 0 or a whole step. It is `null` for the first point, and
+  for a part with no reading at its start or end or with two readings more
+  than 60 s apart inside it.
+- A journey not in the last recompute gets `404`. A journey with no real
+  fixes gets `[]`.
+
 ## Command log
 
 `POST /commands` with `client_id`, `time`, `text`, `action` and an optional

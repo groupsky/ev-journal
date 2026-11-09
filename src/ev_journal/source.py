@@ -4,6 +4,7 @@ from ev_journal.influx import Influx
 from ev_journal.journeys import Charge, Trip
 
 DAY = 86_400_000
+HOUR = 3_600_000
 GPS_WINDOW = 7 * DAY
 
 
@@ -54,6 +55,20 @@ def fixes(db: Influx, start: int, end: int) -> list[tuple[int, float, float]]:
             f" AND acc_m <= 50 AND time >= {t0}ms AND time < {t1}ms"
         )
         out += [(int(r["time"]), r["lat"], r["lon"]) for r in rows if r["lat"] is not None]
+    return out
+
+
+def counters(db: Influx, start: int, end: int) -> list[tuple[int, float | None, float | None]]:
+    """Battery lifetime counters: (t, cum_out_kwh, cum_in_kwh). Read in
+    windows of an hour, so a long journey stays under the row limit."""
+    out = []
+    for t0 in range(start, end + 1, HOUR):
+        t1 = min(t0 + HOUR, end + 1)
+        rows = db.query(
+            "SELECT cum_out_kwh, cum_in_kwh FROM ioniq WHERE \"group\" = 'bms/2101'"
+            f" AND time >= {t0}ms AND time < {t1}ms"
+        )
+        out += [(int(r["time"]), _f(r["cum_out_kwh"]), _f(r["cum_in_kwh"])) for r in rows]
     return out
 
 
