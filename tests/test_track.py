@@ -6,7 +6,7 @@ from week import PLACES, week
 from ev_journal import outputs
 from ev_journal.geo import dist_m
 from ev_journal.journeys import build
-from ev_journal.track import journey_track
+from ev_journal.track import Energy, journey_track
 
 UTC = ZoneInfo("UTC")
 S = 1000
@@ -25,7 +25,7 @@ def test_thinning_matches_ev_track():
     pts = journey_track([f for t in j.trips for f in t.fixes], [])
     assert len(pts) == len(rows) > 2
     for p, row in zip(pts, rows, strict=True):
-        assert row.endswith(f" {p['t']}") and f"lat={float(p['lat'])}" in row
+        assert row.endswith(f" {p['t']}") and f"lat={float(p['lat'])},lon={float(p['lon'])} " in row
 
 
 def test_kwh_per_100km_per_part():
@@ -61,6 +61,16 @@ def test_null_where_the_counters_have_a_gap():
         else:  # across the gap, or after the last reading
             assert p["kwh_per_100km"] is None
     assert any(p["t"] > 100 * S for p in pts)
+
+
+def test_energy_before_a_gap_stays_before_it():
+    # The counter steps 0.1 kWh at 5 s and then stays flat up to a gap
+    # (30 s to 100 s); after the gap it is 0.9 kWh higher. The flat part
+    # used nothing more, the gap is not spread over it.
+    readings = [(k * S, 100.0 + (0.1 if k >= 5 else 0), 0.0) for k in range(31)]
+    readings.append((100 * S, 101.0, 0.0))
+    e = Energy(readings)
+    assert abs(e.used(5 * S, 30 * S)) < 1e-9 and e.used(29 * S, 100 * S) is None
 
 
 def test_no_fixes_no_points():

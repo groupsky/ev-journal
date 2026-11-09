@@ -22,8 +22,19 @@ class Energy:
     def __init__(self, readings: list):
         rs = [(t, round(o - i, 3)) for t, o, i in readings if o is not None and i is not None]
         self.times = [r[0] for r in rs]
-        self.gaps = [a[0] for a, b in zip(rs, rs[1:], strict=False) if b[0] - a[0] > COUNTER_GAP_MS]
-        knots = [r for k, r in enumerate(rs) if k in (0, len(rs) - 1) or r[1] != rs[k - 1][1]]
+        gaps = [
+            (a[0], b[0]) for a, b in zip(rs, rs[1:], strict=False) if b[0] - a[0] > COUNTER_GAP_MS
+        ]
+        self.gap_starts = [g[0] for g in gaps]
+        self.gap_ends = [g[1] for g in gaps]
+        # Knots: the first and last reading, each change, and both sides of a
+        # gap, so the line never runs across a gap.
+        edges = {t for g in gaps for t in g}
+        knots = [
+            r
+            for k, r in enumerate(rs)
+            if k in (0, len(rs) - 1) or r[1] != rs[k - 1][1] or r[0] in edges
+        ]
         self.kt = [k[0] for k in knots]
         self.kv = [k[1] for k in knots]
 
@@ -31,14 +42,11 @@ class Energy:
         """kWh used from t0 to t1, or None when the readings do not cover it."""
         if not self.times or t0 < self.times[0] or t1 > self.times[-1]:
             return None
-        # A gap starts at a reading before t1 and ends after t0.
-        g = bisect.bisect_left(self.gaps, t1)
-        if g and self._gap_end(self.gaps[g - 1]) > t0:
+        # Gaps do not overlap, so the last one that starts before t1 decides.
+        g = bisect.bisect_left(self.gap_starts, t1)
+        if g and self.gap_ends[g - 1] > t0:
             return None
         return self._at(t1) - self._at(t0)
-
-    def _gap_end(self, start: int) -> int:
-        return self.times[bisect.bisect_right(self.times, start)]
 
     def _at(self, t: int) -> float:
         k = bisect.bisect_right(self.kt, t)
