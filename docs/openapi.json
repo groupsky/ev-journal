@@ -394,6 +394,54 @@
         "title": "EstimateStation",
         "type": "object"
       },
+      "JourneyDay": {
+        "description": "The journeys that start on one local day, summed.",
+        "properties": {
+          "cost_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when no journey of the day has a price.",
+            "title": "Cost Eur"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "day": {
+            "description": "YYYY-MM-DD in the configured local time zone.",
+            "title": "Day",
+            "type": "string"
+          },
+          "km": {
+            "title": "Km",
+            "type": "number"
+          },
+          "kwh_charged": {
+            "title": "Kwh Charged",
+            "type": "number"
+          },
+          "kwh_used": {
+            "title": "Kwh Used",
+            "type": "number"
+          }
+        },
+        "required": [
+          "day",
+          "count",
+          "km",
+          "kwh_used",
+          "kwh_charged",
+          "cost_eur"
+        ],
+        "title": "JourneyDay",
+        "type": "object"
+      },
       "JourneyItem": {
         "description": "One journey, the same fields as the items of the MQTT `journeys`.",
         "properties": {
@@ -434,6 +482,18 @@
               }
             ],
             "title": "From"
+          },
+          "from_place_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the start place; null if none.",
+            "title": "From Place Id"
           },
           "id": {
             "description": "The journey id (its start, ms).",
@@ -482,6 +542,18 @@
             ],
             "title": "To"
           },
+          "to_place_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the end place; null if none.",
+            "title": "To Place Id"
+          },
           "waiting_min": {
             "title": "Waiting Min",
             "type": "integer"
@@ -493,6 +565,8 @@
           "end",
           "from",
           "to",
+          "from_place_id",
+          "to_place_id",
           "label",
           "not_me",
           "km",
@@ -1403,9 +1477,99 @@
     },
     "/journeys": {
       "get": {
-        "description": "Journeys of the last recompute, newest first, for paging back.\n\nFor the next page, pass the id of the last journey as `before`.",
+        "description": "Journeys of the last recompute, newest first, for paging back.\n\nFor the next page, pass the id of the last journey as `before`.\nThe filters apply together with `before`.",
         "operationId": "get_journeys_journeys_get",
         "parameters": [
+          {
+            "description": "Only journeys that start at or after this, ms.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start at or after this, ms.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Only journeys that start at or before this, ms.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start at or before this, ms.",
+              "title": "To"
+            }
+          },
+          {
+            "description": "true: only journeys with a charge; false: only without.",
+            "in": "query",
+            "name": "with_charge",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only journeys with a charge; false: only without.",
+              "title": "With Charge"
+            }
+          },
+          {
+            "description": "Only journeys with at least this many km.",
+            "in": "query",
+            "name": "min_km",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys with at least this many km.",
+              "title": "Min Km"
+            }
+          },
+          {
+            "description": "Only journeys that start or end at this place id.",
+            "in": "query",
+            "name": "place",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start or end at this place id.",
+              "title": "Place"
+            }
+          },
           {
             "description": "Only journeys that start before this, ms.",
             "in": "query",
@@ -1474,6 +1638,141 @@
           }
         },
         "summary": "Get Journeys"
+      }
+    },
+    "/journeys/days": {
+      "get": {
+        "description": "One row per local day with journeys, newest first. Same filters as /journeys.",
+        "operationId": "get_journey_days_journeys_days_get",
+        "parameters": [
+          {
+            "description": "Only journeys that start at or after this, ms.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start at or after this, ms.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Only journeys that start at or before this, ms.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start at or before this, ms.",
+              "title": "To"
+            }
+          },
+          {
+            "description": "true: only journeys with a charge; false: only without.",
+            "in": "query",
+            "name": "with_charge",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only journeys with a charge; false: only without.",
+              "title": "With Charge"
+            }
+          },
+          {
+            "description": "Only journeys with at least this many km.",
+            "in": "query",
+            "name": "min_km",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys with at least this many km.",
+              "title": "Min Km"
+            }
+          },
+          {
+            "description": "Only journeys that start or end at this place id.",
+            "in": "query",
+            "name": "place",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only journeys that start or end at this place id.",
+              "title": "Place"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JourneyDay"
+                  },
+                  "title": "Response Get Journey Days Journeys Days Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Journey Days"
       }
     },
     "/journeys/{journey_id}/label": {

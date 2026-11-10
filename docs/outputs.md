@@ -129,6 +129,7 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "updated": "2026-01-10T10:30:00Z",
   "journeys": [
     {"id": 1768039200000, "start": "…Z", "end": "…Z", "from": "Test Home", "to": "Test Work",
+     "from_place_id": "1", "to_place_id": "2",
      "label": "other", "not_me": false, "km": 25.0, "kwh_used": 3.0, "drive_min": 30, "waiting_min": 0,
      "charge_min": 0, "charges": 0, "kwh_charged": 0.0, "cost_eur": null}
   ],

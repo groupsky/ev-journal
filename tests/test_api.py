@@ -200,20 +200,27 @@ def test_journey_track(data_dir):
     assert r.status_code == 404 and r.json() == {"detail": "no such journey"}
 
 
-def test_journeys_pages_join_without_gap_or_duplicate(data_dir):
-    def item(i):
-        t = 1_000_000 * (i + 1)
-        return {
-            "id": t, "start": f"s{i}", "end": f"e{i}", "from": "Test Bay", "to": None,
-            "label": None, "not_me": False, "km": 1.0, "kwh_used": 0.2, "drive_min": 3,
-            "waiting_min": 0, "charge_min": 0, "charges": 0, "kwh_charged": 0.0, "cost_eur": None,
-        }  # fmt: skip
+def item(i, t=None, **kw):
+    """A made-up journey item; t is its start in ms."""
+    return {
+        "id": t or 1_000_000 * (i + 1), "start": f"s{i}", "end": f"e{i}", "from": "Test Bay",
+        "to": None, "from_place_id": "1", "to_place_id": None, "label": None, "not_me": False,
+        "km": 1.0, "kwh_used": 0.2, "drive_min": 3, "waiting_min": 0, "charge_min": 0,
+        "charges": 0, "kwh_charged": 0.0, "cost_eur": None, **kw,
+    }  # fmt: skip
 
-    items = [item(i) for i in range(25)]  # oldest first
+
+def journeys_client(data_dir, items, tz=UTC):
     c = CheckedClient(
-        create_app(places.store_path(data_dir), TOKEN, UTC, journey_list=lambda: items)
+        create_app(places.store_path(data_dir), TOKEN, tz, journey_list=lambda: items)
     )
     c.headers["Authorization"] = f"Bearer {TOKEN}"
+    return c
+
+
+def test_journeys_pages_join_without_gap_or_duplicate(data_dir):
+    items = [item(i) for i in range(25)]  # oldest first
+    c = journeys_client(data_dir, items)
     first = c.get("/journeys", params={"limit": 10}).json()
     assert first[0] == items[-1] and first[0]["from"] == "Test Bay"
     second = c.get("/journeys", params={"limit": 10, "before": first[-1]["id"]}).json()
@@ -222,3 +229,121 @@ def test_journeys_pages_join_without_gap_or_duplicate(data_dir):
     assert len(c.get("/journeys").json()) == 20  # the default limit
     assert c.get("/journeys", params={"before": items[0]["id"]}).json() == []
     assert c.get("/journeys", params={"limit": 101}).status_code == 422
+
+
+T0, H = 1_000_000_000, 3_600_000
+
+
+def made_up_mix():
+    # 30 journeys, one every 7 h: some with a charge, some long, two places
+    # with the same name told apart by their ids.
+    return [
+        item(
+            i,
+            t=1_000_000_000 + i * 7 * 3_600_000,
+            km=float(i % 7) * 10,
+            kwh_used=float(i % 7) * 1.5,
+            charges=1 if i % 3 == 0 else 0,
+            kwh_charged=5.0 if i % 3 == 0 else 0.0,
+            cost_eur=1.25 if i % 6 == 0 else None,
+            **{"from": "Test Bay", "to": "Test Bay"},
+            from_place_id="a" if i % 2 else "b",
+            to_place_id="c" if i % 5 == 0 else None,
+        )
+        for i in range(30)
+    ]
+
+
+FILTERS = [
+    ({"from": 1_000_000_000 + 50 * 3_600_000}, lambda j: j["id"] >= 1_000_000_000 + 50 * 3_600_000),
+    ({"to": 1_000_000_000 + 70 * 3_600_000}, lambda j: j["id"] <= 1_000_000_000 + 70 * 3_600_000),
+    ({"with_charge": "true"}, lambda j: j["charges"] > 0),
+    ({"with_charge": "false"}, lambda j: j["charges"] == 0),
+    (
+        {"from": T0 + 50 * H, "to": T0 + 150 * H, "min_km": 20},
+        lambda j: T0 + 50 * H <= j["id"] <= T0 + 150 * H and j["km"] >= 20,
+    ),
+    ({"min_km": 30}, lambda j: j["km"] >= 30),
+    ({"place": "a"}, lambda j: "a" in (j["from_place_id"], j["to_place_id"])),
+    ({"place": "c"}, lambda j: "c" in (j["from_place_id"], j["to_place_id"])),
+]
+
+
+def page_all(c, params, limit=4):
+    got, before = [], None
+    while True:
+        p = {**params, "limit": limit, **({"before": before} if before else {})}
+        page = c.get("/journeys", params=p).json()
+        if not page:
+            return got
+        got += page
+        before = page[-1]["id"]
+
+
+def test_each_filter_alone_and_with_paging(data_dir):
+    items = made_up_mix()
+    c = journeys_client(data_dir, items)
+    for params, want in FILTERS:
+        expect = [j for j in items[::-1] if want(j)]
+        assert 0 < len(expect) < len(items), params
+        assert c.get("/journeys", params={**params, "limit": 100}).json() == expect, params
+        assert page_all(c, params) == expect, params
+    # Together: all filters apply at once; `to` and `before` both apply.
+    both = {"with_charge": "true", "place": "b", "to": items[20]["id"]}
+    expect = [
+        j
+        for j in items[::-1]
+        if j["charges"] and j["from_place_id"] == "b" and j["id"] <= items[20]["id"]
+    ]
+    assert page_all(c, both, limit=2) == expect and expect
+    got = c.get("/journeys", params={**both, "before": items[20]["id"]}).json()
+    assert got == [j for j in expect if j["id"] < items[20]["id"]]
+    assert c.get("/journeys", params={"with_charge": "maybe"}).status_code == 422
+
+
+def test_two_places_with_the_same_name_filter_apart(data_dir):
+    items = made_up_mix()
+    c = journeys_client(data_dir, items)
+    a = c.get("/journeys", params={"place": "a", "limit": 100}).json()
+    b = c.get("/journeys", params={"place": "b", "limit": 100}).json()
+    assert a and b and {j["from"] for j in a + b} == {"Test Bay"}
+    assert {j["from_place_id"] for j in a} == {"a"} and {j["from_place_id"] for j in b} == {"b"}
+    assert not {j["id"] for j in a} & {j["id"] for j in b}
+
+
+def test_days_totals_equal_the_sum_of_the_list(data_dir):
+    items = made_up_mix()
+    c = journeys_client(data_dir, items)
+    for params, _ in [({}, None), *FILTERS]:
+        days = c.get("/journeys/days", params=params).json()
+        listed = c.get("/journeys", params={**params, "limit": 100}).json()
+        assert [d["day"] for d in days] == sorted({d["day"] for d in days}, reverse=True)
+        assert sum(d["count"] for d in days) == len(listed), params
+        for k in ("km", "kwh_used", "kwh_charged"):
+            assert round(sum(d[k] for d in days), 2) == round(sum(j[k] for j in listed), 2)
+        cost = [j["cost_eur"] for j in listed if j["cost_eur"] is not None]
+        assert round(sum(d["cost_eur"] or 0 for d in days), 2) == round(sum(cost), 2)
+    assert any(d["cost_eur"] is None for d in c.get("/journeys/days").json())
+
+
+def test_days_follow_the_local_time_zone_on_a_dst_day(data_dir):
+    # Europe/London moves from GMT to BST at 01:00 UTC on 2026-03-29.
+    h = 3_600_000
+    t0 = 1_774_742_400_000  # 2026-03-29 00:00 UTC = 00:00 local
+    items = [
+        item(0, t=t0 - 1),  # 2026-03-28 23:59:59.999 local
+        item(1, t=t0),  # 2026-03-29 00:00 local
+        item(2, t=t0 + 22 * h + 59 * 60_000),  # 23:59 local (BST)
+        item(3, t=t0 + 23 * h),  # 2026-03-30 00:00 local: a 23 h day
+    ]
+    c = journeys_client(data_dir, items, ZoneInfo("Europe/London"))
+    days = c.get("/journeys/days").json()
+    assert [(d["day"], d["count"]) for d in days] == [
+        ("2026-03-30", 1), ("2026-03-29", 2), ("2026-03-28", 1),
+    ]  # fmt: skip
+    # The same rows in UTC split differently: 23:00 UTC is still the 29th.
+    utc = journeys_client(data_dir, items).get("/journeys/days").json()
+    assert [(d["day"], d["count"]) for d in utc] == [("2026-03-29", 3), ("2026-03-28", 1)]
+    # A day's range in ms (as the client gets it for a jump) picks the same journeys.
+    one = c.get("/journeys/days", params={"from": t0, "to": t0 + 23 * h - 1}).json()
+    assert one == [d for d in days if d["day"] == "2026-03-29"]

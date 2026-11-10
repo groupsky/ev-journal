@@ -67,8 +67,8 @@ the first recompute is done). `null` means "use the computed label". `ev_journey
 
 `GET /journeys?before=<ms>&limit=<n>` gives journeys of the last recompute,
 newest first. Each item has the same fields as the items of `journeys` in the
-retained MQTT summary (`id`, `start`, `end`, `from`, `to`, `label`, `not_me`,
-`km`, `kwh_used`, `drive_min`, `waiting_min`, `charge_min`, `charges`,
+retained MQTT summary (`id`, `start`, `end`, `from`, `to`, `from_place_id`,
+`to_place_id`, `label`, `not_me`, `km`, `kwh_used`, `drive_min`, `waiting_min`, `charge_min`, `charges`,
 `kwh_charged`, `cost_eur`). The MQTT summary holds only the last 10; this is
 for scrolling further back.
 
@@ -78,6 +78,31 @@ for scrolling further back.
 - For the next page, pass the `id` of the last item as `before`. The pages
   then join with no gap and no duplicate. An empty list means no older
   journeys. Before the first recompute is done, the list is empty.
+
+Filters (all optional). They apply together, and together with `before`:
+
+- `from`, `to` (ms): only journeys whose start (`id`) is in the range. `to`
+  is inclusive and `before` is exclusive; when both are given, both apply.
+  `to` alone jumps to a date: the list starts at the last journey on or
+  before it.
+- `with_charge=true|false`: only journeys with a charge, or only without.
+- `min_km`: only journeys with `km` of at least this value.
+- `place=<place id>`: only journeys that start or end at that place. It
+  matches the place id (`from_place_id`, `to_place_id`), not the name, so two
+  places with the same name stay apart. A journey whose end is not a known
+  place has `null` there.
+
+## Journey days
+
+`GET /journeys/days?from=<ms>&to=<ms>` gives one row per local day that has
+journeys, newest first: `day` (`YYYY-MM-DD`), `count`, `km`, `kwh_used`,
+`kwh_charged` and `cost_eur`. It takes the same filters as `GET /journeys`
+(all optional; no paging). A journey counts on the local day of its start, in
+the configured time zone (`EVJ_TZ`), so a day can be 23 or 25 h long on a DST
+change. The totals equal the sum of the `GET /journeys` items for the same
+filters. `cost_eur` is the sum of the journeys that have a price, and `null`
+when none of them has one. A client builds year, month and day headers,
+totals and a jump bar from it.
 
 ## Journey track
 

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response
@@ -210,6 +210,8 @@ class JourneyItem(BaseModel):
     end: str
     from_: str | None = Field(alias="from")
     to: str | None
+    from_place_id: str | None = Field(description="Id of the start place; null if none.")
+    to_place_id: str | None = Field(description="Id of the end place; null if none.")
     label: str | None
     not_me: bool
     km: float
@@ -220,6 +222,40 @@ class JourneyItem(BaseModel):
     charges: int
     kwh_charged: float
     cost_eur: float | None
+
+
+class JourneyDay(BaseModel):
+    """The journeys that start on one local day, summed."""
+
+    day: str = Field(description="YYYY-MM-DD in the configured local time zone.")
+    count: int
+    km: float
+    kwh_used: float
+    kwh_charged: float
+    cost_eur: float | None = Field(description="null when no journey of the day has a price.")
+
+
+class JourneyFilter(BaseModel):
+    """Filters of GET /journeys and GET /journeys/days. All apply together."""
+
+    from_: int | None = Field(
+        None, alias="from", description="Only journeys that start at or after this, ms."
+    )
+    to: int | None = Field(None, description="Only journeys that start at or before this, ms.")
+    with_charge: bool | None = Field(
+        None, description="true: only journeys with a charge; false: only without."
+    )
+    min_km: float | None = Field(None, description="Only journeys with at least this many km.")
+    place: str | None = Field(None, description="Only journeys that start or end at this place id.")
+
+    def keep(self, j: dict) -> bool:
+        return (
+            (self.from_ is None or j["id"] >= self.from_)
+            and (self.to is None or j["id"] <= self.to)
+            and (self.with_charge is None or (j["charges"] > 0) == self.with_charge)
+            and (self.min_km is None or j["km"] >= self.min_km)
+            and (self.place is None or self.place in (j["from_place_id"], j["to_place_id"]))
+        )
 
 
 class Question(BaseModel):
@@ -530,15 +566,41 @@ def create_app(
 
     @r.get("/journeys", response_model=list[JourneyItem])
     def get_journeys(
+        f: Annotated[JourneyFilter, Query()],
         before: int | None = Query(None, description="Only journeys that start before this, ms."),
         limit: int = Query(20, ge=1, le=100),
     ):
         """Journeys of the last recompute, newest first, for paging back.
 
         For the next page, pass the id of the last journey as `before`.
+        The filters apply together with `before`.
         """
-        items = [j for j in journey_list() if before is None or j["id"] < before]
+        items = [j for j in journey_list() if (before is None or j["id"] < before) and f.keep(j)]
         return items[::-1][:limit]
+
+    @r.get("/journeys/days", response_model=list[JourneyDay])
+    def get_journey_days(f: Annotated[JourneyFilter, Query()]):
+        """One row per local day with journeys, newest first. Same filters as /journeys."""
+        days: dict[str, list[dict]] = {}
+        for j in journey_list():
+            if f.keep(j):
+                day = datetime.fromtimestamp(j["id"] / 1000, tz).date().isoformat()
+                days.setdefault(day, []).append(j)
+        out = []
+        for day in sorted(days, reverse=True):
+            js = days[day]
+            costs = [j["cost_eur"] for j in js if j["cost_eur"] is not None]
+            out.append(
+                JourneyDay(
+                    day=day,
+                    count=len(js),
+                    km=round(sum(j["km"] for j in js), 1),
+                    kwh_used=round(sum(j["kwh_used"] for j in js), 2),
+                    kwh_charged=round(sum(j["kwh_charged"] for j in js), 2),
+                    cost_eur=round(sum(costs), 2) if costs else None,
+                )
+            )
+        return out
 
     @r.get("/journeys/{journey_id}/track", response_model=list[TrackPoint], responses=nf)
     def get_track(journey_id: int):

@@ -144,6 +144,8 @@ def journey_item(j: Journey) -> dict:
         "end": _iso(j.end),
         "from": j.start_place.name if j.start_place else None,
         "to": j.end_place.name if j.end_place else None,
+        "from_place_id": j.start_place.id if j.start_place else None,
+        "to_place_id": j.end_place.id if j.end_place else None,
         "label": j.label,
         "not_me": j.not_me,
         "km": round(j.km, 1),
