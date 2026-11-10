@@ -65,10 +65,13 @@ def test_match_one_two_none():
     assert match(None, [a]) == (None, "no position")
 
 
-def test_position_is_the_nearest_fix_in_time():
+def test_position_prefers_the_fix_before_the_start():
     t = Track([(0, 0.1, 0.1), (100 * 60_000, 0.2, 0.2)])
-    assert charges.position(t, 15 * 60_000, 90 * 60_000) == (0.2, 0.2)  # 10 min after the end
-    assert charges.position(t, 5 * 60_000, 80 * 60_000) == (0.1, 0.1)  # 5 min before the start
+    # 15 min before the start wins over 10 min after the end (#28).
+    assert charges.position(t, 15 * 60_000, 90 * 60_000) == (0.1, 0.1)
+    assert charges.position(t, 5 * 60_000, 80 * 60_000) == (0.1, 0.1)
+    # No fix before the start within 30 min: the first after the end.
+    assert charges.position(t, 40 * 60_000, 90 * 60_000) == (0.2, 0.2)
     assert charges.position(Track([(0, 0.1, 0.1)]), 31 * 60_000, 40 * 60_000) is None
 
 
@@ -305,3 +308,20 @@ def test_price_estimate_at_a_position(client, data_dir):
     assert (got["station"]["id"], got["source"]) == ("fines:1", "feed")
     assert got["eur_per_battery_kwh"] == pytest.approx(0.40 * 36.0 / 30.0)
     assert client.get("/charges/price-estimate", params={"lat": 0, "lon": 0}).status_code == 422
+
+
+def test_meter_recorded_charge_is_home_even_with_a_far_fix(tmp_path):
+    db = places.open_store(tmp_path)
+    charges.update_stations(db, tmp_path / "f.geojson", 0, Feed())
+    w = week()
+    r = build(w.trips, w.charges, w.fixes, PLACES, UTC)
+    dc = sorted(r.charges, key=lambda c: c.start)[1]  # at a station, far from home
+    db.row_factory = None
+    charges.sync(db, r, PLACES, dc.end + 2 * DAY)
+    assert _row(db, dc.start)[0] == 0
+    dc.home_cost = True  # the house charger meter recorded it
+    charges.sync(db, r, PLACES, dc.end + 2 * DAY)
+    assert _row(db, dc.start)[:3] == (1, None, "home")
+    assert not db.execute(
+        "SELECT 1 FROM questions WHERE charge_id = ? AND answered_at IS NULL", (dc.start,)
+    ).fetchall()

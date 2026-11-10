@@ -18,12 +18,17 @@ per battery kWh. #5 uses the price.
 
 ## Match
 
-- The car's position at the charge: the real GPS fix nearest in time, either
-  the last one before the start or the first one after the end, at most
-  30 min away. No such fix: `no position`.
-- A charge is at home when that position is in a `home` place. When the
-  position is in no place (or unknown), the place where the trip before it
-  ended decides. Home charges are not matched (`home`) and not priced here.
+- The car's position at the charge: the last real GPS fix before the start,
+  at most 30 min before it. Only when there is none: the first one after the
+  end, at most 30 min after it. The car does not move while it charges, and
+  after a night charge the first fix of the morning is often taken while it
+  already drives off. No such fix: `no position`.
+- A charge is at home when that position is in a `home` place, even when a
+  place of another kind is nearer. When the position is in no place (or
+  unknown), the place where the trip before it ended decides. A charge that
+  the house charger meter recorded (a home row in `ioniq_charges`) is at
+  home, whatever GPS says. Home charges are not matched (`home`) and not
+  priced here, and their open questions are deleted.
 - A charge that is gone from homy is deleted, with its open question.
 - The station is the nearest one within **75 m**: `ok`. Two or more within
   75 m: the nearest, marked `unsure`. None: `no station`.
