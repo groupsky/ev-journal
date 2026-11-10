@@ -231,6 +231,9 @@ def test_journeys_pages_join_without_gap_or_duplicate(data_dir):
     assert c.get("/journeys", params={"limit": 101}).status_code == 422
 
 
+T0, H = 1_000_000_000, 3_600_000
+
+
 def made_up_mix():
     # 30 journeys, one every 7 h: some with a charge, some long, two places
     # with the same name told apart by their ids.
@@ -256,6 +259,10 @@ FILTERS = [
     ({"to": 1_000_000_000 + 70 * 3_600_000}, lambda j: j["id"] <= 1_000_000_000 + 70 * 3_600_000),
     ({"with_charge": "true"}, lambda j: j["charges"] > 0),
     ({"with_charge": "false"}, lambda j: j["charges"] == 0),
+    (
+        {"from": T0 + 50 * H, "to": T0 + 150 * H, "min_km": 20},
+        lambda j: T0 + 50 * H <= j["id"] <= T0 + 150 * H and j["km"] >= 20,
+    ),
     ({"min_km": 30}, lambda j: j["km"] >= 30),
     ({"place": "a"}, lambda j: "a" in (j["from_place_id"], j["to_place_id"])),
     ({"place": "c"}, lambda j: "c" in (j["from_place_id"], j["to_place_id"])),
