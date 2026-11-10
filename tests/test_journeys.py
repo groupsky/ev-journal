@@ -5,7 +5,7 @@ from week import HOME, LAKE, PLACES, STATION, WORK, week
 
 from ev_journal.geo import dist_m, thin, track_km
 from ev_journal.journeys import build
-from ev_journal.places import place_at
+from ev_journal.places import Place, place_at
 
 UTC = ZoneInfo("UTC")
 
@@ -130,6 +130,10 @@ def test_place_at():
     assert place_at(PLACES, (0.1001, 0.1001)) == HOME
     assert place_at(PLACES, (0.15, 0.15)) is None
     assert place_at(PLACES, None) is None
+    # A home place that holds the fix wins over a nearer place of another kind (#28).
+    near = Place("p-near", "Test Near", "other", 0.1003, 0.1, 150)
+    assert place_at([near, HOME], (0.1002, 0.1)) == HOME
+    assert place_at([near, WORK], (0.1002, 0.1)) == near
 
 
 def test_trip_without_fixes_has_no_places():

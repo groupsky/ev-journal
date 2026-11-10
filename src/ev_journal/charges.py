@@ -142,17 +142,20 @@ def all_stations(db: sqlite3.Connection) -> list[Station]:
 
 
 def position(track: Track, start: int, end: int) -> tuple[float, float] | None:
-    """The real fix nearest in time: the last before the start or the first after the end."""
-    best = None
+    """The last real fix before the start; the first after the end only when there is none.
+
+    The car does not move while it charges, but after a night charge the first
+    fix of the morning is often taken while it already drives off (#28).
+    """
     i = bisect.bisect_right(track.times, start)
-    if i:
-        best = (start - track.times[i - 1], track.fixes[i - 1])
+    if i and start - track.times[i - 1] <= FIX_WINDOW_MS:
+        f = track.fixes[i - 1]
+        return f[1], f[2]
     k = bisect.bisect_left(track.times, end)
-    if k < len(track.times) and (best is None or track.times[k] - end < best[0]):
-        best = (track.times[k] - end, track.fixes[k])
-    if best is None or best[0] > FIX_WINDOW_MS:
-        return None
-    return best[1][1], best[1][2]
+    if k < len(track.times) and track.times[k] - end <= FIX_WINDOW_MS:
+        f = track.fixes[k]
+        return f[1], f[2]
+    return None
 
 
 def match(pos: tuple[float, float] | None, stations: list[Station]) -> tuple[str | None, str]:
@@ -184,7 +187,8 @@ def sync(db: sqlite3.Connection, r: Result, places: list[Place], now: int) -> No
     for c in r.charges:
         pos = position(r.track, c.start, c.end) if r.track else None
         here = place_at(places, pos) or c.place
-        at_home = here is not None and here.kind == "home"
+        # The house charger meter recorded it: a home charge, whatever GPS says (#28).
+        at_home = c.home_cost or (here is not None and here.kind == "home")
         sid, how = (None, "home") if at_home else match(pos, stations)
         db.execute(
             "INSERT INTO charges (id, end_ts, battery_kwh, type, at_home, station_id, match)"

@@ -123,12 +123,16 @@ def all_labels(db: sqlite3.Connection) -> list[tuple[int, str | None, bool]]:
 
 
 def place_at(places: list[Place], pos: tuple[float, float] | None) -> Place | None:
-    """The nearest place whose radius holds the position."""
+    """The nearest place whose radius holds the position.
+
+    A home place that holds it wins, even when another place is nearer (#28).
+    """
     if pos is None:
         return None
-    best, best_d = None, None
+    best, best_key = None, None
     for p in places:
         d = dist_m(p.lat, p.lon, pos[0], pos[1])
-        if d <= p.radius_m and (best_d is None or d < best_d):
-            best, best_d = p, d
+        key = (p.kind != "home", d)
+        if d <= p.radius_m and (best_key is None or key < best_key):
+            best, best_key = p, key
     return best
