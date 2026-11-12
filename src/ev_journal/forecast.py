@@ -365,6 +365,7 @@ class Advice:
     start: datetime | None = None
     end: datetime | None = None
     capped: bool = False  # the night zone cannot reach the wanted target
+    # capped with no level: no time is left in the night zone (#41)
 
 
 def advise(
@@ -399,7 +400,10 @@ def advise(
             start = end - timedelta(minutes=minutes)
             return Advice(target, name, start.astimezone(tz), end.astimezone(tz))
     name, _meter_kw, kw = levels[-1]
-    reach = math.floor(soc_now + window_min / 60 * kw / kwh_per_pct)
+    gain = window_min / 60 * kw / kwh_per_pct
+    if gain < 1:  # the zone is over, or too short to add 1 % (#41)
+        return Advice(target, capped=True)
+    reach = math.floor(soc_now + gain)
     return Advice(min(reach, 100), name, z0.astimezone(tz), end.astimezone(tz), capped=True)
 
 
@@ -420,7 +424,9 @@ def message(
         s = f"При пристигане около {now:.0f} % на екрана. " + s
     else:
         s += f" Сега {now:.0f} % на екрана."
-    if a.level is None:
+    if a.level is None and a.capped:
+        s += " Не остава време за зареждане в нощната зона."
+    elif a.level is None:
         s += " Не е нужно зареждане тази вечер."
     else:
         s += (
