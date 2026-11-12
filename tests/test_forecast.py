@@ -536,3 +536,44 @@ def test_the_screen_map_is_learned_from_pairs():
     assert (a, b) == (pytest.approx(2), pytest.approx(1.05))
     assert forecast.display_map(pairs[:5]) == forecast.DISPLAY
     assert forecast.display_map([(50 + i % 3, 52 + i % 2) for i in range(30)]) == forecast.DISPLAY
+
+
+def test_after_the_night_zone_there_is_no_window():
+    # #41: asked at 06:47, after the zone ended at 06:00.
+    now = at(date(2026, 1, 13), 6, 47)
+    a = advise(20, 6.0, KPP, WINTER, at(date(2026, 1, 13), 6, 50), 10, now)
+    assert (a.level, a.start, a.end, a.capped) == (None, None, None, True)
+    f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
+    assert message(f, 20, a, False) == (
+        "Утре: около 4 kWh (лош ден 6). Сега 20 % на екрана."
+        " Не остава време за зареждане в нощната зона."
+    )
+
+
+def test_soc_at_or_above_the_target_has_no_window():
+    # #41: 78 % with 3 min left (less than 1 %) must not give a window.
+    now = at(date(2026, 1, 13), 5, 57)
+    a = advise(78, 27.0, KPP, WINTER, None, 10, now)
+    assert (a.level, a.start, a.end) == (None, None, None)
+    target = advise(0, 6.0, KPP, WINTER, None, 10).target
+    for soc in (target, target + 1.5, 99):
+        a = advise(soc, 6.0, KPP, WINTER, None, 10)
+        assert a.level is None and (a.start, a.end) == (None, None)
+
+
+def test_start_is_never_after_end():
+    rnd = random.Random(41)
+    for _ in range(3000):
+        zone = WINTER if rnd.random() < 0.5 else SUMMER
+        z0 = zone[0]
+        now = z0 + timedelta(minutes=rnd.uniform(-120, 11 * 60)) if rnd.random() < 0.8 else None
+        dep = z0 + timedelta(minutes=rnd.uniform(-60, 12 * 60)) if rnd.random() < 0.7 else None
+        soc = rnd.uniform(0, 100)
+        a = advise(soc, rnd.uniform(0, 40), KPP, zone, dep, rnd.uniform(0, 20), now)
+        if a.start is not None and a.end is not None:
+            assert a.start <= a.end
+            assert a.level is not None
+            if now is not None:
+                assert a.start >= now
+        else:
+            assert (a.level, a.start, a.end) == (None, None, None)

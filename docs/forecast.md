@@ -182,6 +182,10 @@ Left out for now:
 - When even the high level cannot reach the target inside the zone, the
   advice is high for the whole zone, and the target is what that reaches
   (`capped`).
+- When the zone is over, or too short to add 1 %, there is no window: no
+  level, no start and end, `capped`, and the message says no time is left in
+  the night zone ([#41](https://github.com/groupsky/ev-journal/issues/41)).
+  `start` is never after `end`.
 - At these powers (0.04–0.1 C) the level hardly changes wear; time at a high
   % and heat do. So the charge goes only to the target and ends as late as
   the zone allows. Off days have their own, usually lower, need.
