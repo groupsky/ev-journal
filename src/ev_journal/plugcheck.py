@@ -25,16 +25,13 @@ def next_at(now: int, hhmm: str, tz: ZoneInfo) -> int:
     return int(at.timestamp() * 1000)
 
 
-def plug_state(
-    frames: list[tuple[int, bool]], meter_w: list[float | None], charge_row: bool = False
-) -> str:
-    """plugged, out or unknown, from what was seen since the trip end: the car
-    frames ((time, cable in)), the charger meter power (W), and whether a
-    charge row of ioniq_sessions starts (homy opens it at plug-in).
+def plug_state(frames: list[tuple[int, bool]], meter_w: list[float | None]) -> str:
+    """plugged, out or unknown, from the car frames since the trip end
+    ((time, cable in)) and the charger meter power since then (W).
 
-    Charging power or a charge row says plugged. No power says nothing: the
-    car's timer may start later. Else the last frame decides; none: unknown."""
-    if charge_row or any(w is not None and w > ON_W for w in meter_w):
+    Charging power says plugged. No power says nothing: the car's timer may
+    start later. Else the last frame decides; none: unknown."""
+    if any(w is not None and w > ON_W for w in meter_w):
         return "plugged"
     if not frames:
         return "unknown"

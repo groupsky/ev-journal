@@ -190,18 +190,18 @@ def plug_decision(s: Settings, r: Result, now: int) -> tuple[str | None, str]:
         last is not None
         and last.end_place is not None
         and last.end_place.kind == "home"
-        and not source.started_after(db, "trip", last.end)
+        and not source.moved_after(db, last.end)
     )
     state = "unknown"
     if at_home:
         meter = [w for _t, w, _e in source.meter_minutes(db, last.end, now)]
-        frames = source.plug_frames(db, last.end)
-        state = plugcheck.plug_state(frames, meter, source.started_after(db, "charge", last.end))
+        state = plugcheck.plug_state(source.plug_frames(db, last.end), meter)
     return plugcheck.decide(r.advice, at_home, state)
 
 
-def plug_check(s: Settings) -> None:
-    """Read fresh data, decide, and publish the notice once per evening (#43)."""
+def plug_check(s: Settings, at: int) -> None:
+    """Read fresh data, decide, and publish the notice once per evening (#43).
+    at: the planned check time; it gives the notice id and time."""
     r = compute(s)
     now = int(time.time() * 1000)
     text, why = plug_decision(s, r, now)
@@ -210,7 +210,7 @@ def plug_check(s: Settings) -> None:
         return
     from ev_journal import mqtt
 
-    local = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz))
+    local = datetime.fromtimestamp(at / 1000, ZoneInfo(s.tz))
     n = plugcheck.notice(local.date().isoformat(), local.isoformat(timespec="seconds"), text)
     store = places.open_store(s.data_dir)
     try:
@@ -431,10 +431,11 @@ def main() -> None:
             now = int(time.time() * 1000)
             if next_check is not None and now >= next_check:
                 try:
-                    plug_check(s)
+                    plug_check(s, next_check)
                 except Exception as e:  # one try per evening
                     print(f"ev-journal: plug check failed: {e!r}", file=sys.stderr)
                 next_check = plugcheck.next_at(now, s.plug_check_at, tz)
+                continue
             if now < next_run:
                 time.sleep((min(next_run, next_check or next_run) - now) / 1000)
                 continue

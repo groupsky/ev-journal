@@ -30,10 +30,6 @@ def test_charger_power_since_arrival_sends_nothing():
     assert text is None
 
 
-def test_charge_row_since_arrival_is_plugged():
-    assert plugcheck.plug_state([(ARRIVED + 60_000, False)], [0.0], charge_row=True) == "plugged"
-
-
 def test_idle_meter_alone_is_not_plugged():
     assert plugcheck.plug_state([], [40.0, 0.0]) == "unknown"
 
@@ -100,14 +96,12 @@ def test_plug_check_setting():
 class FakeInflux:
     """Answers the plug check's queries from made-up rows."""
 
-    def __init__(self, *_a, frames=(), watts=(), trip_after=False, charge_after=False):
-        self.frames, self.watts = frames, watts
-        self.after = {"trip": trip_after, "charge": charge_after}
+    def __init__(self, *_a, frames=(), watts=(), moved=False):
+        self.frames, self.watts, self.moved = frames, watts, moved
 
     def query(self, q):
-        if "ioniq_sessions" in q:
-            kind = "trip" if "'trip'" in q else "charge"
-            return [{"time": ARRIVED + 1}] if self.after[kind] else []
+        if "speed_kph > 0" in q:
+            return [{"time": ARRIVED + 1, "speed_kph": 30.0}] if self.moved else []
         if "bcm_b00e" in q:
             return [{"time": t, "charge_connector": v} for t, v in self.frames]
         if "xymd1" in q:
@@ -143,8 +137,9 @@ def run_check(monkeypatch, tmp_path, kind="home", **fake):
         tz="Europe/Sofia",
         data_dir=tmp_path,
     )
-    cli.plug_check(s)
-    cli.plug_check(s)  # the same evening again: nothing new
+    at = ms(2026, 1, 10, 22, 30)
+    cli.plug_check(s, at)
+    cli.plug_check(s, at)  # the same evening again: nothing new
     return sent
 
 
@@ -153,7 +148,8 @@ def test_check_publishes_one_notice_not_retained(monkeypatch, tmp_path):
     assert len(sent) == 1
     topic, retain, m = sent[0]
     assert topic == "homy/ioniq/notice" and retain is False
-    assert m["kind"] == "plug_check" and m["id"].startswith("plug_check:")
+    assert m == {**m, "id": "plug_check:2026-01-10", "kind": "plug_check"}
+    assert m["time"] == "2026-01-10T22:30:00+02:00"
     assert m["text"].startswith(plugcheck.TEXT_OUT)
 
 
@@ -162,8 +158,7 @@ def test_check_publishes_one_notice_not_retained(monkeypatch, tmp_path):
     [
         ("home", {"frames": [(ARRIVED + 60_000, 1)]}),
         ("home", {"watts": [0.0, 3_600.0]}),
-        ("home", {"trip_after": True}),
-        ("home", {"frames": [(ARRIVED + 60_000, 0)], "charge_after": True}),
+        ("home", {"frames": [(ARRIVED + 60_000, 0)], "moved": True}),  # a trip runs
         ("work", {}),
     ],
 )

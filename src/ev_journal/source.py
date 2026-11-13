@@ -123,9 +123,10 @@ def soc_pairs(db: Influx, start: int) -> list[tuple[float, float]]:
     return [(bms[t], screen[t]) for t in sorted(bms.keys() & screen.keys())]
 
 
-def started_after(db: Influx, kind: str, t: int) -> bool:
-    """A session row of this kind (also one still running) starts after t."""
-    rows = db.query(f"SELECT * FROM ioniq_sessions WHERE kind = '{kind}' AND time > {t}ms LIMIT 1")
+def moved_after(db: Influx, t: int) -> bool:
+    """A car frame after t shows speed: a trip runs or ran (homy writes a trip
+    row only when the trip ends)."""
+    rows = db.query(f"SELECT speed_kph FROM ioniq WHERE speed_kph > 0 AND time > {t}ms LIMIT 1")
     return bool(rows)
 
 
