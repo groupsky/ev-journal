@@ -22,6 +22,7 @@ from ev_journal import (
     charges,
     cleanup,
     forecast,
+    health,
     homecharge,
     outputs,
     places,
@@ -385,6 +386,12 @@ def serve_api(s: Settings, state: dict) -> None:
     from ev_journal.api import create_app
 
     places.open_store(s.data_dir).close()  # create or upgrade the tables
+    reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    health_series = health.Health(
+        places.store_path(s.data_dir),
+        ZoneInfo(s.tz),
+        lambda a, b: source.health_frames(reader, a, b),
+    )
     app = create_app(
         places.store_path(s.data_dir),
         s.api_token,
@@ -399,6 +406,8 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: odometer_now(s),
         lambda: outside_temps(s),
         tyre_rules(s),
+        health_series.daily,
+        health_series.fan,
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

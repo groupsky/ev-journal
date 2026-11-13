@@ -123,6 +123,26 @@ points `{"t", "lat", "lon", "kwh_per_100km"}`, in time order:
 - A journey not in the last recompute gets `404`. A journey with no real
   fixes gets `[]`.
 
+## Health series
+
+For the trend charts on the car app's Health tab
+([#49](https://github.com/groupsky/ev-journal/issues/49)). Rules and reasons:
+[design.md](design.md#health-series).
+
+`GET /health/daily?from=YYYY-MM-DD&to=YYYY-MM-DD` gives one row per local day
+with car data, oldest first: `{"day", "soh_max", "isolation_min_kohm",
+"cell_spread_mv", "cell_spread_mv_max", "module_temp_spread_c_max",
+"aux_12v_rest"}`. A field is `null` on a day without a valid value. `from`
+after `to`, or more than 10 years, gets `422`.
+
+`GET /health/fan?months=12` gives, per month and per `fan_status` step (1–9),
+`{"month": "YYYY-MM", "step", "count", "fan_feedback_median"}`, over the last
+`months` months with this one, oldest first. A slower fan at the same step
+over the months is the sign to look for.
+
+The first request of a long range reads the history from InfluxDB once and
+can take a while.
+
 ## Command log
 
 `POST /commands` with `client_id`, `time`, `text`, `action` and an optional

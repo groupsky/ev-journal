@@ -193,6 +193,30 @@ class PriceEstimate(BaseModel):
     loss_ratio: float = Field(description="Network kWh per battery kWh.")
 
 
+class HealthDay(BaseModel):
+    day: str = Field(description="Local day, YYYY-MM-DD.")
+    soh_max: float | None = Field(description="The day's highest SoH, % (bms/2105 soh).")
+    isolation_min_kohm: float | None = Field(description="The day's lowest isolation, kΩ.")
+    cell_spread_mv: float | None = Field(
+        description="Median cell spread (max − min cell voltage), mV, over frames"
+        " with |hv_a| below 5 A."
+    )
+    cell_spread_mv_max: float | None = Field(description="The day's highest cell spread, mV.")
+    module_temp_spread_c_max: float | None = Field(
+        description="The day's highest module temperature spread, °C."
+    )
+    aux_12v_rest: float | None = Field(
+        description="The first 12 V reading after a park of at least 6 h, V."
+    )
+
+
+class FanRow(BaseModel):
+    month: str = Field(description="YYYY-MM.")
+    step: int = Field(description="fan_status, 1–9.")
+    count: int = Field(description="Frames at this step in the month.")
+    fan_feedback_median: float
+
+
 class TrackPoint(BaseModel):
     t: int = Field(description="Time of the GPS fix, ms.")
     lat: float
@@ -474,6 +498,8 @@ def create_app(
     km_now: Callable[[], tuple[int, float] | None] = lambda: None,
     temps: Callable[[], list[float]] = list,
     tyre_rules: tyres.Rules | None = None,
+    health_daily: Callable[[date, date], list[dict]] = lambda _a, _b: [],
+    health_fan: Callable[[int], list[dict]] = lambda _n: [],
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -482,7 +508,8 @@ def create_app(
     journeys of the last recompute as in the MQTT summary, oldest first.
     places_changed runs after a place is created, changed or deleted.
     km_now gives the last odometer reading (t, km), or None. temps gives one
-    mean outside temperature per day with a reading, oldest first."""
+    mean outside temperature per day with a reading, oldest first.
+    health_daily and health_fan give the health series (#49)."""
     tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
@@ -911,6 +938,23 @@ def create_app(
         if pts is None:
             raise Fail(404, "no such journey")
         return pts
+
+    @r.get("/health/daily", response_model=list[HealthDay])
+    def get_health_daily(
+        from_: date = Query(alias="from", description="First local day."),
+        to: date = Query(description="Last local day."),
+    ):
+        """One row per local day with car data, oldest first. A field is
+        null on a day without a valid value. Rules: docs/design.md."""
+        if to < from_ or (to - from_).days > 3660:
+            raise Fail(422, "need from <= to and at most 10 years")
+        return health_daily(from_, to)
+
+    @r.get("/health/fan", response_model=list[FanRow])
+    def get_health_fan(months: int = Query(12, ge=1, le=120)):
+        """Per month and fan step: frame count and median fan_feedback, over
+        the last `months` months with this one, oldest first."""
+        return health_fan(months)
 
     @r.post(
         "/commands",
