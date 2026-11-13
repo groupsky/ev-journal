@@ -254,11 +254,13 @@ The car app reads the car only while the car powers it, so the plug state
 comes from what was seen since the end of the last trip:
 
 - **plugged**: the house charger meter (`xymd1`, device `charger`) showed
-  charging power (above 150 W, as for home charges), or the last car frame
+  charging power (above 150 W, as for home charges), or a charge row of
+  `ioniq_sessions` starts (homy opens it when the cable goes in, often hours
+  before the timer starts the charge; see below), or the last car frame
   says the cable is in: `bcm_b00e charge_connector = 1`, or `bms/2101`
   `ac_port = 1` or `dc_port = 1`;
-- **out**: the last car frame says the cable is out, and the meter showed no
-  charging power;
+- **out**: the last car frame says the cable is out, no charge row starts,
+  and the meter showed no charging power;
 - **unknown**: no car frame since the trip end.
 
 No charging power at the check time does **not** mean "not plugged": the
@@ -291,7 +293,8 @@ meter gives whole watts, one sample every 8 s; while charging it reads about
 
 In the first row, 116,680 samples are exactly 0 W; the other 30 are the
 ramp at the start of charging. So the meter adds no plug signal while the
-car app sleeps, and the rule above stays. The car's `plugged-waiting` state
+car app sleeps. The charge row does: in the first row of the table, the charge
+session was open about 2.3 h on average before the meter showed power. The car's `plugged-waiting` state
 is not in the data: the car sleeps while it waits, and only 5 of 117 charge
 sessions have a cable-in frame in the 14 h before they start. That is why
 "unknown" is a common case and sends the notice.

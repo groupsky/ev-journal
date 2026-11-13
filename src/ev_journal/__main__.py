@@ -190,12 +190,13 @@ def plug_decision(s: Settings, r: Result, now: int) -> tuple[str | None, str]:
         last is not None
         and last.end_place is not None
         and last.end_place.kind == "home"
-        and not source.trip_started_after(db, last.end)
+        and not source.started_after(db, "trip", last.end)
     )
     state = "unknown"
     if at_home:
         meter = [w for _t, w, _e in source.meter_minutes(db, last.end, now)]
-        state = plugcheck.plug_state(source.plug_frames(db, last.end), meter)
+        frames = source.plug_frames(db, last.end)
+        state = plugcheck.plug_state(frames, meter, source.started_after(db, "charge", last.end))
     return plugcheck.decide(r.advice, at_home, state)
 
 

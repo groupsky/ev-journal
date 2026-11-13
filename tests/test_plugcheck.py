@@ -30,6 +30,10 @@ def test_charger_power_since_arrival_sends_nothing():
     assert text is None
 
 
+def test_charge_row_since_arrival_is_plugged():
+    assert plugcheck.plug_state([(ARRIVED + 60_000, False)], [0.0], charge_row=True) == "plugged"
+
+
 def test_idle_meter_alone_is_not_plugged():
     assert plugcheck.plug_state([], [40.0, 0.0]) == "unknown"
 
@@ -96,12 +100,14 @@ def test_plug_check_setting():
 class FakeInflux:
     """Answers the plug check's queries from made-up rows."""
 
-    def __init__(self, *_a, frames=(), watts=(), trip_after=False):
-        self.frames, self.watts, self.trip_after = frames, watts, trip_after
+    def __init__(self, *_a, frames=(), watts=(), trip_after=False, charge_after=False):
+        self.frames, self.watts = frames, watts
+        self.after = {"trip": trip_after, "charge": charge_after}
 
     def query(self, q):
         if "ioniq_sessions" in q:
-            return [{"time": ARRIVED + 1}] if self.trip_after else []
+            kind = "trip" if "'trip'" in q else "charge"
+            return [{"time": ARRIVED + 1}] if self.after[kind] else []
         if "bcm_b00e" in q:
             return [{"time": t, "charge_connector": v} for t, v in self.frames]
         if "xymd1" in q:
@@ -157,6 +163,7 @@ def test_check_publishes_one_notice_not_retained(monkeypatch, tmp_path):
         ("home", {"frames": [(ARRIVED + 60_000, 1)]}),
         ("home", {"watts": [0.0, 3_600.0]}),
         ("home", {"trip_after": True}),
+        ("home", {"frames": [(ARRIVED + 60_000, 0)], "charge_after": True}),
         ("work", {}),
     ],
 )
