@@ -29,6 +29,7 @@ from ev_journal import (
     price,
     source,
     track,
+    tyres,
     upkeep,
 )
 from ev_journal.influx import Influx
@@ -175,7 +176,12 @@ def run(s: Settings) -> Result:
         except Exception as e:  # a side output: the summary still goes out
             print(f"ev-journal: no upkeep in the summary: {e!r}", file=sys.stderr)
             up = []
-        mqtt.publish(s.mqtt_url, outputs.summary(r, now, ZoneInfo(s.tz), up))
+        try:
+            ty = tyres_part(s, now)
+        except Exception as e:  # a side output: the summary still goes out
+            print(f"ev-journal: no tyres in the summary: {e!r}", file=sys.stderr)
+            ty = None
+        mqtt.publish(s.mqtt_url, outputs.summary(r, now, ZoneInfo(s.tz), up, ty))
         try:
             publish_home(s)
         except Exception as e:  # a side output: the run goes on
@@ -222,6 +228,36 @@ def upkeep_part(s: Settings, now: int) -> list[dict]:
     try:
         today = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz)).date()
         return upkeep.mqtt_part(upkeep.items(store, today, odo[1] if odo else None))
+    finally:
+        store.close()
+
+
+def tyre_rules(s: Settings) -> tyres.Rules:
+    return tyres.Rules(s.tyre_max_age_years, s.tyre_swap_c, s.tyre_swap_days)
+
+
+def outside_temps(s: Settings) -> list[float]:
+    """One mean outside temperature per day with a reading, over the last 30
+    days, or 3 times EVJ_TYRE_SWAP_DAYS when that is longer (#45)."""
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    days = max(30, 3 * s.tyre_swap_days)
+    return source.outside_temps(db, int(time.time() * 1000) - days * source.DAY, s.tz)
+
+
+def tyres_part(s: Settings, now: int) -> dict:
+    """The tyres for the MQTT summary (#45)."""
+    odo = odometer_now(s)
+    try:
+        temps = outside_temps(s)
+    except Exception as e:  # no hint, the rest still goes out
+        print(f"ev-journal: no outside temperature: {e!r}", file=sys.stderr)
+        temps = []
+    store = places.open_store(s.data_dir)
+    try:
+        today = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz)).date()
+        sets, swaps = tyres.load(store)
+        o = tyres.overview(sets, swaps, today, odo[1] if odo else None, temps, tyre_rules(s))
+        return tyres.mqtt_part(o)
     finally:
         store.close()
 
@@ -316,6 +352,8 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["journey_items"],
         (lambda: publish_home_soon(s)) if s.mqtt_url else lambda: None,
         lambda: odometer_now(s),
+        lambda: outside_temps(s),
+        tyre_rules(s),
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

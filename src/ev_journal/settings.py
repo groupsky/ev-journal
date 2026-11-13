@@ -47,6 +47,9 @@ class Settings:
     departures: dict[str, str | None] = field(default_factory=dict)  # day type -> HH:MM
     day_ranges: tuple[tuple[str, date, date], ...] = ()  # (day type, first, last)
     plug_check_at: str | None = "22:30"  # HH:MM local; None: no plug check (#43)
+    tyre_max_age_years: float = 6.0  # (#45)
+    tyre_swap_c: float = 7.0
+    tyre_swap_days: int = 7
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -74,7 +77,7 @@ class Settings:
             departure=_hhmm(e.get("EVJ_DEPARTURE") or None),
             reserve_pct=float(e.get("EVJ_RESERVE_PCT", "10")),
             preheat=e.get("EVJ_PREHEAT", "") in ("1", "true", "yes"),
-            timer_step_min=_positive(e.get("EVJ_TIMER_STEP_MIN", "15")),
+            timer_step_min=_positive(e, "EVJ_TIMER_STEP_MIN", "15"),
             departures={
                 k[len(DEPARTURE_PREFIX) :].lower(): _hhmm(_none(v))
                 for k, v in e.items()
@@ -82,6 +85,9 @@ class Settings:
             },
             day_ranges=_ranges(e.get("EVJ_DAY_TYPES", "")),
             plug_check_at=_hhmm(_none(e.get("EVJ_PLUG_CHECK_AT", "22:30"))),
+            tyre_max_age_years=float(e.get("EVJ_TYRE_MAX_AGE_YEARS", "6")),
+            tyre_swap_c=float(e.get("EVJ_TYRE_SWAP_C", "7")),
+            tyre_swap_days=_positive(e, "EVJ_TYRE_SWAP_DAYS", "7"),
         )._checked()
 
     def _checked(self) -> "Settings":
@@ -118,8 +124,9 @@ def _ranges(v: str) -> tuple[tuple[str, date, date], ...]:
     return tuple(out)
 
 
-def _positive(v: str) -> int:
+def _positive(e, key: str, default: str) -> int:
+    v = e.get(key, default)
     n = int(v)
     if n <= 0:
-        raise ValueError(f"EVJ_TIMER_STEP_MIN must be above 0, not {v!r}")
+        raise ValueError(f"{key} must be above 0, not {v!r}")
     return n

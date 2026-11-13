@@ -44,6 +44,9 @@ environment points to.
 | `EVJ_RESERVE_PCT` | SoC % added to the bad-day need | `10` |
 | `EVJ_PREHEAT` | `1` when a weekday preheat is set in the car | — |
 | `EVJ_PLUG_CHECK_AT` | time of the evening plug check, `HH:MM` local, or `none` (off) ([forecast](docs/forecast.md#plug-check)) | `22:30` |
+| `EVJ_TYRE_MAX_AGE_YEARS` | a tyre set older than this gets a warning ([api](docs/api.md#tyres)) | `6` |
+| `EVJ_TYRE_SWAP_C` | the season line for the tyre swap hint, °C | `7` |
+| `EVJ_TYRE_SWAP_DAYS` | days with a reading that the swap hint averages | `7` |
 
 ## Run
 

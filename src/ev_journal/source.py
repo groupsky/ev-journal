@@ -89,6 +89,22 @@ def last_odometer(db: Influx) -> tuple[int, float] | None:
     return int(rows[0]["time"]), float(rows[0]["last"])
 
 
+def outside_temps(db: Influx, start: int, tz: str) -> list[float]:
+    """One mean outside temperature (°C) per local day since start, oldest
+    first, from the car's ambient and hvac readings (#45). A day with no
+    reading is left out."""
+    days: dict[int, list[float]] = {}
+    for group, field in (("ambient", "c"), ("hvac", "outdoor_c")):
+        rows = db.query(
+            f"SELECT mean({field}) FROM ioniq WHERE \"group\" = '{group}'"
+            f" AND time >= {start}ms GROUP BY time(1d) fill(none) tz('{tz}')"
+        )
+        for r in rows:
+            if r["mean"] is not None:
+                days.setdefault(int(r["time"]), []).append(float(r["mean"]))
+    return [sum(v) / len(v) for _t, v in sorted(days.items())]
+
+
 def home_costs(db: Influx) -> dict[int, float]:
     """Cost of each home charge from ioniq_charges, by charge start (ms).
 
