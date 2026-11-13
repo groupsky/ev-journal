@@ -173,3 +173,38 @@ def test_pending_writes_nothing(tmp_path):
     assert (
         len(reminders.pending(db, items, None, now + timedelta(hours=1).seconds * 1000, local)) == 1
     )
+
+
+def test_send_reminders_publishes_on_the_notice_topic(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+    from ev_journal import mqtt
+
+    db = places.open_store(tmp_path)
+    db.execute(
+        "INSERT INTO upkeep_items (id, name, kind, due_date, version, updated_at)"
+        " VALUES ('p1', 'Test paper', 'paper', '2030-07-15', 1, 0)"
+    )
+    db.commit()
+    db.close()
+    sent = []
+    monkeypatch.setattr(
+        mqtt, "publish", lambda url, m, topic="", retain=True: sent.append((topic, retain, m))
+    )
+    monkeypatch.setattr(cli, "odometer_now", lambda s: None)
+    monkeypatch.setattr(cli, "outside_temps", lambda s: [])
+    s = SimpleNamespace(
+        mqtt_url="mqtt://broker",
+        data_dir=tmp_path,
+        tz="Europe/Sofia",
+        tyre_max_age_years=6.0,
+        tyre_swap_c=7.0,
+        tyre_swap_days=7,
+    )
+    now, _ = at("2030-06-15")
+    cli.send_reminders(s, now)
+    cli.send_reminders(s, now + 60_000)
+    [(topic, retain, m)] = sent
+    assert topic == "homy/ioniq/notice" and retain is False
+    assert m["id"] == "upkeep:p1:2030-07-15:30d"
