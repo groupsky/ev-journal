@@ -13,7 +13,7 @@ import sys
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
@@ -23,7 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ev_journal import charges, forecast
+from ev_journal import charges, forecast, upkeep
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -270,6 +270,64 @@ class AnswerIn(BaseModel):
     text: str = Field(description='The amount in EUR and the network kWh, e.g. "5.00 12.5".')
 
 
+class UpkeepIn(BaseModel):
+    name: str = Field(min_length=1)
+    kind: Literal["paper", "service"]
+    due_date: date | None = Field(default=None, description="A paper: the day it runs out.")
+    every_months: int | None = Field(default=None, gt=0)
+    every_km: float | None = Field(default=None, gt=0)
+    last_date: date | None = None
+    last_km: float | None = Field(default=None, ge=0)
+    remind_days: list[int] = Field(default=[30, 7], description="The first one sets `soon`.")
+    remind_km: float = Field(default=1000, ge=0)
+    note: str | None = None
+    version: int | None = Field(default=None, description="The version the client saw.")
+
+
+class UpkeepItem(BaseModel):
+    id: str
+    name: str
+    kind: Literal["paper", "service"]
+    due_date: str | None
+    every_months: int | None
+    every_km: float | None
+    last_date: str | None
+    last_km: float | None
+    remind_days: list[int]
+    remind_km: float
+    note: str | None
+    version: int
+    updated_at: int
+    next_date: str | None = Field(description="due_date for a paper; last_date + every_months.")
+    next_km: float | None = Field(description="last_km + every_km.")
+    days_left: int | None
+    km_left: float | None = Field(description="null without an odometer reading.")
+    status: Literal["overdue", "soon", "ok"]
+
+
+class UpkeepList(BaseModel):
+    km_now: float | None = Field(description="The last odometer reading; null if none yet.")
+    km_now_time: int | None = Field(description="Time of that reading, ms.")
+    items: list[UpkeepItem] = Field(description="The most urgent first.")
+
+
+class UpkeepDoneIn(BaseModel):
+    date: str | None = Field(default=None, description="YYYY-MM-DD; default today.")
+    km: float | None = Field(default=None, ge=0, description="Default: the last odometer reading.")
+    due_date: str | None = Field(default=None, description="A paper: the new end day. Needed.")
+    note: str | None = None
+
+
+class UpkeepLog(BaseModel):
+    id: int
+    item_id: str
+    date: str
+    km: float | None
+    note: str | None
+    due_date: str | None
+    created_at: int
+
+
 def _place(r: sqlite3.Row) -> Place:
     return Place(
         id=r["id"],
@@ -357,13 +415,15 @@ def create_app(
     track: Callable[[int], list[dict] | None] = lambda _id: None,
     journey_list: Callable[[], list[dict]] = list,
     places_changed: Callable[[], None] = lambda: None,
+    km_now: Callable[[], tuple[int, float] | None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
     advice_ctx what is needed to make it again on request and track the
     points of a journey (None for an unknown journey) and journey_list the
     journeys of the last recompute as in the MQTT summary, oldest first.
-    places_changed runs after a place is created, changed or deleted."""
+    places_changed runs after a place is created, changed or deleted.
+    km_now gives the last odometer reading (t, km), or None."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -555,6 +615,98 @@ def create_app(
     @r.delete("/routes/{route_id}", response_model=Written, responses=nf)
     def delete_route(route_id: str, version: int | None = None, conn=Depends(db)):
         return remove(conn, "routes", route_id, version)
+
+    def upkeep_cols(p: UpkeepIn) -> dict:
+        return {
+            "name": p.name,
+            "kind": p.kind,
+            "due_date": p.due_date.isoformat() if p.due_date else None,
+            "every_months": p.every_months,
+            "every_km": p.every_km,
+            "last_date": p.last_date.isoformat() if p.last_date else None,
+            "last_km": p.last_km,
+            "remind_days": json.dumps(p.remind_days),
+            "remind_km": p.remind_km,
+            "note": p.note,
+        }
+
+    def today() -> date:
+        return datetime.now(tz).date()
+
+    def odo() -> float | None:
+        got = km_now()
+        return got[1] if got else None
+
+    def upkeep_item(row) -> UpkeepItem:
+        return UpkeepItem(**upkeep.derive(upkeep.row_dict(row), today(), odo()))
+
+    @r.get("/upkeep", response_model=UpkeepList)
+    def list_upkeep(conn=Depends(db)):
+        """All upkeep items with their status, the most urgent first."""
+        got = km_now()
+        km = got[1] if got else None
+        return UpkeepList(
+            km_now=km,
+            km_now_time=got[0] if got else None,
+            items=upkeep.items(conn, today(), km),
+        )
+
+    @r.post("/upkeep", response_model=Written, status_code=201)
+    def create_upkeep(p: UpkeepIn, conn=Depends(db)):
+        return save(conn, "upkeep_items", uuid.uuid4().hex[:12], upkeep_cols(p), None, True)
+
+    @r.get("/upkeep/{item_id}", response_model=UpkeepItem, responses=nf)
+    def get_upkeep(item_id: str, conn=Depends(db)):
+        return upkeep_item(get_row(conn, "upkeep_items", item_id))
+
+    @r.put("/upkeep/{item_id}", response_model=Written, responses=nf)
+    def put_upkeep(item_id: str, p: UpkeepIn, conn=Depends(db)):
+        return save(conn, "upkeep_items", item_id, upkeep_cols(p), p.version, False)
+
+    @r.delete("/upkeep/{item_id}", response_model=Written, responses=nf)
+    def delete_upkeep(item_id: str, version: int | None = None, conn=Depends(db)):
+        return remove(conn, "upkeep_items", item_id, version)
+
+    @r.post("/upkeep/{item_id}/done", response_model=UpkeepItem, responses=nf)
+    def upkeep_done(item_id: str, p: UpkeepDoneIn, conn=Depends(db)):
+        """Log that the item was done, and move last_date and last_km (a paper:
+        due_date too). date defaults to today, km to the last odometer reading."""
+        for v in (p.date, p.due_date):
+            try:
+                v and date.fromisoformat(v)
+            except ValueError as e:
+                raise Fail(422, f"not a date: {v}") from e
+        day = p.date or today().isoformat()
+        km = p.km if p.km is not None else odo()
+
+        def cols() -> dict:
+            row = upkeep.row_dict(get_row(conn, "upkeep_items", item_id))
+            if row["kind"] == "paper" and not p.due_date:
+                raise Fail(422, "a paper needs due_date")
+            conn.execute(
+                "INSERT INTO upkeep_log (item_id, date, km, note, due_date, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (item_id, day, km, p.note, p.due_date, store.now_ms()),
+            )
+            keep = ("id", "version", "updated_at", "deleted", "seq")
+            row = {k: v for k, v in row.items() if k not in keep}
+            row["remind_days"] = json.dumps(row["remind_days"])
+            row["last_date"], row["last_km"] = day, km
+            if row["kind"] == "paper":
+                row["due_date"] = p.due_date
+            return row
+
+        save(conn, "upkeep_items", item_id, cols, None, False)
+        return upkeep_item(get_row(conn, "upkeep_items", item_id))
+
+    @r.get("/upkeep/{item_id}/log", response_model=list[UpkeepLog], responses=nf)
+    def upkeep_log(item_id: str, conn=Depends(db)):
+        """What was done, newest first."""
+        get_row(conn, "upkeep_items", item_id)
+        rows = conn.execute(
+            "SELECT * FROM upkeep_log WHERE item_id = ? ORDER BY date DESC, id DESC", (item_id,)
+        )
+        return [UpkeepLog(**dict(x)) for x in rows]
 
     @r.put(
         "/journeys/{journey_id}/label",

@@ -1,7 +1,13 @@
 """Upkeep status with made-up items (#44)."""
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
+import pytest
+from conftest import TOKEN, CheckedClient
+
+from ev_journal import places
+from ev_journal.api import create_app
 from ev_journal.upkeep import add_months, derive, mqtt_part, urgency
 
 TODAY = date(2030, 6, 15)
@@ -98,3 +104,71 @@ def test_order_and_mqtt_part():
         "2031-03-01",
     ]
     assert set(part[0]) == {"name", "status", "next_date", "next_km", "days_left", "km_left"}
+
+
+# The API, with a made-up odometer.
+
+PAPER = {"name": "Test paper", "kind": "paper", "due_date": "2999-01-01"}
+OIL = {"name": "Test oil", "kind": "service", "every_km": 15000, "last_km": 40000}
+
+
+@pytest.fixture
+def odo():
+    return {"value": (1_900_000_000_000, 50_000.0)}
+
+
+@pytest.fixture
+def upk(data_dir, odo):
+    app = create_app(
+        places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), km_now=lambda: odo["value"]
+    )
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    return c
+
+
+def test_api_create_list_change_delete(upk):
+    pid = upk.post("/upkeep", json=PAPER).json()["id"]
+    oid = upk.post("/upkeep", json={**OIL, "last_km": 36000}).json()["id"]
+    got = upk.get("/upkeep").json()
+    assert got["km_now"] == 50_000 and got["km_now_time"] == 1_900_000_000_000
+    assert [i["id"] for i in got["items"]] == [oid, pid]  # soon before ok
+    assert got["items"][0]["status"] == "soon" and got["items"][0]["km_left"] == 1000
+    w = upk.put(f"/upkeep/{oid}", json={**OIL, "version": 1}).json()
+    assert w["version"] == 2
+    assert upk.get(f"/upkeep/{oid}").json()["status"] == "ok"
+    upk.delete(f"/upkeep/{oid}")
+    assert upk.get(f"/upkeep/{oid}").status_code == 404
+    assert [i["id"] for i in upk.get("/upkeep").json()["items"]] == [pid]
+
+
+def test_api_no_odometer_yet(upk, odo):
+    odo["value"] = None
+    oid = upk.post("/upkeep", json={**OIL, "every_months": 12, "last_date": "2999-01-01"}).json()
+    got = upk.get("/upkeep").json()
+    assert got["km_now"] is None
+    item = got["items"][0]
+    assert item["id"] == oid["id"] and item["km_left"] is None and item["next_date"] == "3000-01-01"
+    assert item["status"] == "ok"
+
+
+def test_api_done_moves_last_and_logs(upk):
+    oid = upk.post("/upkeep", json=OIL).json()["id"]
+    got = upk.post(f"/upkeep/{oid}/done", json={"note": "test"}).json()
+    assert got["last_km"] == 50_000 and got["next_km"] == 65_000 and got["version"] == 2
+    assert got["last_date"] == datetime.now(ZoneInfo("UTC")).date().isoformat()
+    got = upk.post(f"/upkeep/{oid}/done", json={"date": "2999-02-01", "km": 60000}).json()
+    assert got["last_date"] == "2999-02-01" and got["last_km"] == 60_000
+    log = upk.get(f"/upkeep/{oid}/log").json()
+    assert [x["km"] for x in log] == [60_000, 50_000] and log[1]["note"] == "test"
+
+
+def test_api_paper_done_needs_due_date(upk):
+    pid = upk.post("/upkeep", json=PAPER).json()["id"]
+    assert upk.post(f"/upkeep/{pid}/done", json={}).status_code == 422
+    assert upk.get(f"/upkeep/{pid}/log").json() == []
+    got = upk.post(f"/upkeep/{pid}/done", json={"due_date": "3000-01-01"}).json()
+    assert got["due_date"] == "3000-01-01" and got["next_date"] == "3000-01-01"
+    assert upk.get(f"/upkeep/{pid}/log").json()[0]["due_date"] == "3000-01-01"
+    assert upk.post(f"/upkeep/{pid}/done", json={"due_date": "soon"}).status_code == 422
+    assert upk.post("/upkeep/nope/done", json={}).status_code == 404
