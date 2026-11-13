@@ -267,3 +267,24 @@ def home_charge_rows(db: Influx, start: int) -> list[dict]:
         "SELECT cost_day_eur, meter_kwh_day, cost_night_eur, meter_kwh_night"
         f" FROM ioniq_charges WHERE place = 'home' AND time >= {start}ms"
     )
+
+
+HEATER_BUCKET = "10m"
+HEATER_BUCKET_MS = 10 * 60_000
+
+
+def heater(db: Influx, start: int, end: int):
+    """Per 10 min: (t, max heater_1, max heater_2) of bms/2105 and (t, max
+    temp_max) of bms/2101, for the battery heater check (#47)."""
+    hs, ms = [], []
+    for t0 in range(start, end, MONTH):
+        t1 = min(t0 + MONTH, end)
+        w = f" AND time >= {t0}ms AND time < {t1}ms GROUP BY time({HEATER_BUCKET}) fill(none)"
+        rows = db.query(
+            "SELECT max(heater_1) AS h1, max(heater_2) AS h2 FROM ioniq"
+            " WHERE \"group\" = 'bms/2105'" + w
+        )
+        hs += [(int(r["time"]), _f(r["h1"]), _f(r["h2"])) for r in rows]
+        rows = db.query("SELECT max(temp_max) AS m FROM ioniq WHERE \"group\" = 'bms/2101'" + w)
+        ms += [(int(r["time"]), _f(r["m"])) for r in rows]
+    return hs, ms

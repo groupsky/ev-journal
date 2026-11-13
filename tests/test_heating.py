@@ -164,3 +164,12 @@ def test_totals_and_journey_rows():
         (None, False, 5.0),  # the last reading is older than an hour
     ]
     assert abs(rows[0]["eur"] - 1.2) < 1e-9
+
+
+def test_battery_heater_check():
+    b = 10 * MIN
+    hs = [(T0, 10.0, 11.0), (T0 + b, 25.0, None), (T0 + 2 * b, None, None), (T0 + 3 * b, 30.0, 9.0)]
+    ms = [(T0, 10.0), (T0 + b, 12.0), (T0 + 2 * b, 12.0)]  # no module reading at T0 + 3b
+    on = heating.heater_on(hs, ms)
+    assert on == [T0 + b]
+    assert heating.on_minutes(on, [(T0, T0 + 2 * b), (T0 + 3 * b, T0 + 5 * b)], b) == [10.0, 0.0]

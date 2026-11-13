@@ -240,3 +240,27 @@ def compare(rows: list[dict]) -> list[dict]:
             }
         out.append(g)
     return out
+
+
+HEATER_MARGIN_C = 2.0  # a heater reading this far above the warmest module: the heater runs
+
+
+def heater_on(
+    heater: list[tuple[int, float | None, float | None]],
+    modules: list[tuple[int, float | None]],
+    margin: float = HEATER_MARGIN_C,
+) -> list[int]:
+    """Buckets where heater_1 or heater_2 is above the warmest module (#47).
+    heater: (t, heater_1, heater_2); modules: (t, temp_max), same buckets."""
+    warm = dict(modules)
+    out = []
+    for t, h1, h2 in heater:
+        hs = [h for h in (h1, h2) if h is not None]
+        if hs and warm.get(t) is not None and max(hs) > warm[t] + margin:
+            out.append(t)
+    return out
+
+
+def on_minutes(on: list[int], spans: list[tuple[int, int]], bucket_ms: int) -> list[float]:
+    """Minutes of heater-on buckets inside each span (start, end)."""
+    return [sum(bucket_ms for t in on if a <= t <= b) / MIN for a, b in spans]

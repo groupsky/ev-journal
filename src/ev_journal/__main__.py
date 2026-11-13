@@ -475,6 +475,59 @@ def by_key(t: int, r: Result) -> str:
     return next(m.key for m in reversed(r.months) if m.start <= t)
 
 
+def print_heating(s: Settings, r: Result) -> None:
+    """Preheats, the compare table and the battery heater check (#47).
+    Money stays out: kWh and counts only."""
+    ps = r.preheats
+
+    def n(cond) -> int:
+        return sum(1 for p in ps if cond(p))
+
+    def mean(vals: list) -> str:
+        return f"{statistics.fmean(vals):.2f} (n = {len(vals)})" if vals else "- (n = 0)"
+
+    print(
+        f"preheats: {len(ps)}, from state {n(lambda p: p.source == 'state')},"
+        f" from meter {n(lambda p: p.source == 'meter')},"
+        f" inside a home charge {n(lambda p: p.in_charge is not None)},"
+        f" with a journey {n(lambda p: p.journey is not None)},"
+        f" with a cost {n(lambda p: p.cost_eur is not None)}"
+    )
+    print(
+        f"  mean wall kWh {mean([p.wall_kwh for p in ps if p.wall_kwh is not None])},"
+        f" mean battery kWh {mean([p.battery_kwh for p in ps if p.battery_kwh is not None])}"
+    )
+    since = int(time.time() * 1000) - 90 * source.DAY
+    print("preheat vs no preheat, commute journeys, last 90 days:")
+    print("  band °C   preheat  n  preheat kWh  battery kWh  kWh/100km")
+    for g in heating.compare([j for j in r.heating_rows if j["start"] >= since]):
+        vals = [g.get(k) for k in ("preheat_kwh", "battery_kwh", "kwh_per_100km")]
+        txt = "  ".join("-" if v is None else f"{v:10.2f}" for v in vals)
+        lo, hi = g["band_c"]
+        print(f"  {lo:+3d}..{hi:+3d}  {g['preheat']!s:5s} {g['count']:4d}  {txt}")
+    if not r.trips:
+        return
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    hs, ms = source.heater(db, r.trips[0].start - source.DAY, int(time.time() * 1000))
+    on = heating.heater_on(hs, ms)
+    home = [
+        (c.start, c.end)
+        for c in r.charges
+        if c.home_cost or (c.place is not None and c.place.kind == "home")
+    ]
+    step = source.HEATER_BUCKET_MS
+    pre_on = heating.on_minutes(on, [(p.start, p.end) for p in ps], step)
+    ch_on = heating.on_minutes(on, home, step)
+    print(
+        f"battery heater: {len(on)} of {len(hs)} buckets ({source.HEATER_BUCKET}) above the"
+        f" warmest module by {heating.HEATER_MARGIN_C} °C"
+    )
+    print(
+        f"  in {sum(m > 0 for m in pre_on)}/{len(ps)} preheats ({sum(pre_on):.0f} min),"
+        f" in {sum(m > 0 for m in ch_on)}/{len(home)} home charges ({sum(ch_on):.0f} min)"
+    )
+
+
 def dry_run(s: Settings) -> None:
     r = compute(s)
     print("month    trips journeys outings  gps_km  odo_km   gap%  gps_trips")
@@ -569,6 +622,7 @@ def dry_run(s: Settings) -> None:
                 if name in by
             )
         )
+    print_heating(s, r)
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
