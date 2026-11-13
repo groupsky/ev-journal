@@ -174,6 +174,50 @@ Each item also gets:
 When the odometer cannot be read, `km_now` is `null`, as with no reading. A paper needs the new `due_date` (`422`
 without it); it replaces the old one.
 
+## Tyres
+
+The car's tyre sets: which one is on, the km and age of each, and a hint
+when it is time to swap. See [design.md](design.md#tyres).
+
+| method | path | does |
+|---|---|---|
+| `GET` | `/tyres` | `km_now`, the `fitted` set, `hint`, `age_warning` and all `sets` |
+| `GET` | `/tyres/sets` | all sets, by name |
+| `POST` | `/tyres/sets` | create; the server picks the id |
+| `PUT` | `/tyres/sets/{id}` | change |
+| `DELETE` | `/tyres/sets/{id}` | delete; `409` when the set has swaps (retire it instead) |
+| `POST` | `/tyres/swaps` | put a set on: `{"set_id", "date"?, "km"?}` |
+| `GET` | `/tyres/swaps` | the swap log, newest first |
+
+A set: `name`, `season` (`winter`, `summer` or `all`), `size`, `dot` (the
+DOT date code `WWYY`, for example `0721` = week 7 of 2021; `422` when it is
+not 4 digits or the week is not 1 to 53), `retired`, `note`. Errors and
+versions work as for places.
+
+Each set also gets:
+
+- `km`: the odometer change over each time it was on. The set on now runs
+  to `km_now`.
+- `age_years`: from the Monday of the DOT week to today; `null` without a
+  DOT code.
+- `age_warning`: older than `EVJ_TYRE_MAX_AGE_YEARS` (default 6).
+- `fitted_since`: the swap day, for the set on now; else `null`.
+
+`fitted` is the set of the last swap (by date, then km), or `null`.
+`age_warning` at the top lists the names of the sets, not retired, that are
+too old.
+
+`hint` is `winter`, `summer` or `null`. With a `summer` set on, it is
+`winter` when the mean outside temperature of the last `EVJ_TYRE_SWAP_DAYS`
+days (default 7) is below `EVJ_TYRE_SWAP_C` (default 7 °C); with a `winter`
+set on, `summer` when it is above. Only days with a car reading count. No
+hint with an `all` set on, when no set of the other season is left (not
+retired), or with fewer days of readings.
+
+`POST /tyres/swaps`: `date` defaults to today and `km` to `km_now`; `422`
+when there is no km at all or no such set. The set that was on before comes
+off at the same moment.
+
 ## Advice
 
 `GET /advice`: tomorrow's forecast and charging advice from the last

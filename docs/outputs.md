@@ -152,7 +152,9 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
              "effects": [{"key": "month_mod2", "value": 1, "effect_kwh": 1.8}],
              "score": {"all": {"days": 91, "covered_pct": 92.3, "normal_error_kwh": 3.7}}},
   "upkeep": [{"name": "Test item", "status": "soon", "next_date": "2026-02-01",
-              "next_km": 60000.0, "days_left": 22, "km_left": 4200.0}]
+              "next_km": 60000.0, "days_left": 22, "km_left": 4200.0}],
+  "tyres": {"fitted": {"name": "Test set", "season": "summer", "age_years": 3.2},
+            "hint": "winter", "age_warning": []}
 }
 ```
 
@@ -176,6 +178,11 @@ when the meter has shown no charging for 2 min; `min_to_target` is then
 `upkeep` holds the car's upkeep items ([api.md](api.md#upkeep)): every item
 that is `soon` or `overdue`, then the next 3 that are `ok`, the most urgent
 first. `[]` when there are none.
+
+`tyres` holds the tyre set on now (`fitted`: `name`, `season`,
+`age_years`, or `null`), the season-swap `hint` (`winter`, `summer` or
+`null`) and `age_warning`, the names of the sets that are too old
+([api.md](api.md#tyres)).
 
 ### Notices
 

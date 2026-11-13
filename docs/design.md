@@ -79,12 +79,32 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
 - The real items, dates and km are data. They are entered through the API
   and never go into the repo.
 
+## Tyres
+
+- The car can have more than one tyre set. A **swap** puts a set on at a
+  date and an odometer km; the set on before comes off at the same moment
+  ([#45](https://github.com/groupsky/ev-journal/issues/45)).
+- They live in the same SQLite file (`tyre_sets`, with the sync rules of
+  places, and `tyre_swaps`, the swap log). The km of a set are the sum of
+  the odometer change over each time it was on; the set on now runs to the
+  last odometer reading. A set with swaps is retired, not deleted, so its
+  km stay.
+- The age comes from the DOT date code (`WWYY`), counted from the Monday of
+  that week. A set older than `EVJ_TYRE_MAX_AGE_YEARS` gets a warning.
+- The **season hint** uses the car's outside temperature (`ioniq` groups
+  `ambient` field `c` and `hvac` field `outdoor_c`), one mean per local day
+  over the last 30 days. The car reads only while it runs, so a day with no
+  reading is left out. The mean of the last 7 such days below 7 °C says
+  "winter"; above says "summer". The same mean is used both ways: it is
+  simple and one warm or cold day does not flip it.
+- The real sets, DOT codes and swap dates are data, entered through the API.
+
 ## Storage and outputs
 
-- The store (places, routes, upkeep items, labels, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
+- The store (places, routes, upkeep items, tyre sets and swaps, labels, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
 - Outputs:
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
-  - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, and the upkeep items that are due) for a Home Assistant view in homy.
+  - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, the upkeep items that are due, and the tyre set on now with its hint) for a Home Assistant view in homy.
   - Notices on MQTT (not retained), for example the evening plug check; homy sends them on to a person ([outputs.md](outputs.md#notices)).
   - The home place on MQTT (retained), so homy can tell when the car leaves home ([outputs.md](outputs.md#home-place)).
 
