@@ -169,6 +169,7 @@ def run(s: Settings) -> Result:
         from ev_journal import mqtt
 
         mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
+        publish_home(s)
     reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     deleted = cleanup.cleanup(reader, db, r)
     try:
@@ -180,6 +181,19 @@ def run(s: Settings) -> Result:
         f"{deleted} stale deleted, station feed {feed}"
     )
     return r
+
+
+def publish_home(s: Settings) -> None:
+    """The home place, retained, for homy's car checks (#50)."""
+    from ev_journal import mqtt
+
+    store = places.open_store(s.data_dir)
+    try:
+        msg = outputs.home_message(places.all_places(store), int(time.time() * 1000))
+    finally:
+        store.close()
+    if msg is not None:
+        mqtt.publish(s.mqtt_url, msg, mqtt.HOME_TOPIC)
 
 
 def plug_decision(s: Settings, r: Result, now: int) -> tuple[str | None, str]:
@@ -257,6 +271,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["advice_ctx"],
         lambda jid: journey_track(s, state["fixes"], jid),
         lambda: state["journey_items"],
+        (lambda: publish_home(s)) if s.mqtt_url else lambda: None,
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

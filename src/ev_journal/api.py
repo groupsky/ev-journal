@@ -356,12 +356,14 @@ def create_app(
     advice_ctx: Callable[[], dict | None] = lambda: None,
     track: Callable[[int], list[dict] | None] = lambda _id: None,
     journey_list: Callable[[], list[dict]] = list,
+    places_changed: Callable[[], None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
     advice_ctx what is needed to make it again on request and track the
     points of a journey (None for an unknown journey) and journey_list the
-    journeys of the last recompute as in the MQTT summary, oldest first."""
+    journeys of the last recompute as in the MQTT summary, oldest first.
+    places_changed runs after a place is created, changed or deleted."""
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -464,6 +466,14 @@ def create_app(
         stale = seen is not None and seen < old["version"]
         return Written(id=id_, version=old["version"] + 1, updated_at=t, stale=stale)
 
+    def changed(w: Written) -> Written:
+        """Tell about a place change; a failure there does not fail the write."""
+        try:
+            places_changed()
+        except Exception as e:
+            print(f"ev-journal: after a place change: {e!r}", file=sys.stderr)
+        return w
+
     def place_cols(p: PlaceIn) -> dict:
         return {
             "name": p.name,
@@ -504,7 +514,7 @@ def create_app(
 
     @r.post("/places", response_model=Written, status_code=201)
     def create_place(p: PlaceIn, conn=Depends(db)):
-        return save(conn, "places", uuid.uuid4().hex[:12], place_cols(p), None, True)
+        return changed(save(conn, "places", uuid.uuid4().hex[:12], place_cols(p), None, True))
 
     @r.get("/places/{place_id}", response_model=Place, responses=nf)
     def get_place(place_id: str, conn=Depends(db)):
@@ -512,7 +522,7 @@ def create_app(
 
     @r.put("/places/{place_id}", response_model=Written, responses=nf)
     def put_place(place_id: str, p: PlaceIn, conn=Depends(db)):
-        return save(conn, "places", place_id, place_cols(p), p.version, False)
+        return changed(save(conn, "places", place_id, place_cols(p), p.version, False))
 
     @r.delete(
         "/places/{place_id}",
@@ -520,7 +530,9 @@ def create_app(
         responses={**nf, 409: {"model": Error, "description": "A route uses this place."}},
     )
     def delete_place(place_id: str, version: int | None = None, conn=Depends(db)):
-        return remove(conn, "places", place_id, version, lambda: not_in_a_route(conn, place_id))
+        return changed(
+            remove(conn, "places", place_id, version, lambda: not_in_a_route(conn, place_id))
+        )
 
     @r.get("/routes", response_model=RouteList)
     def list_routes(changed_since: int | None = None, conn=Depends(db)):
