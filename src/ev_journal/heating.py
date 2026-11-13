@@ -60,8 +60,12 @@ def stretch(
     for p in ps:
         if any(s <= p.start and p.end <= e for s, e in charges):
             continue
-        lo = max((e + MIN for s, e in charges if e <= p.start), default=None)
-        hi = min((s - MIN for s, e in charges if s >= p.end), default=None)
+        # A charge that started before (or ends after) the preheat bounds it,
+        # even when it overlaps a little. The bounds never shrink the preheat.
+        lo = max((e + MIN for s, e in charges if s < p.start), default=None)
+        hi = min((s - MIN for s, e in charges if e > p.end), default=None)
+        lo = None if lo is None else min(lo, p.start)
+        hi = None if hi is None else max(hi, p.end)
         for b in bs:
             if b.start <= p.end and p.start <= b.end:
                 p.start = min(p.start, b.start) if lo is None else max(min(p.start, b.start), lo)

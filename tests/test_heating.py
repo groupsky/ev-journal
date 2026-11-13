@@ -220,3 +220,7 @@ def test_stretch_stays_out_of_charges_and_joins():
     p = Preheat(T0 + 10 * MIN, T0 + 12 * MIN, "state")
     heating.stretch([p], rows, [(T0, T0 + 20 * MIN)])
     assert (p.start, p.end) == (T0 + 10 * MIN, T0 + 12 * MIN)
+    # A charge that runs a little past the first frame: no widening into it.
+    p = Preheat(T0 + 10 * MIN, T0 + 12 * MIN, "state")
+    heating.stretch([p], rows, [(T0 - 60 * MIN, T0 + 11 * MIN)])
+    assert (p.start, p.end) == (T0 + 10 * MIN, T0 + 29 * MIN)
