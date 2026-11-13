@@ -100,9 +100,49 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
   simple and one warm or cold day does not flip it.
 - The real sets, DOT codes and swap dates are data, entered through the API.
 
+## Health series
+
+The car app draws battery health trends from `/health/daily` and
+`/health/fan` ([#49](https://github.com/groupsky/ev-journal/issues/49),
+[api.md](api.md#health-series)).
+
+- **Why from here:** the raw car data in InfluxDB is kept forever and covers
+  every drive. The box in the car sees only what it read while it was on, and
+  loses it on a reinstall. ev-journal already reads that InfluxDB, and the car
+  app already uses this API with the same token. Not chosen: the box asking
+  InfluxDB itself (it would need database passwords), and Grafana (not usable
+  on the car screen, nor offline).
+- **Rules per local day** (`ioniq` measurement, by `group`):
+  - `soh_max`: the highest `soh` of `bms/2105`. The value moves on single
+    frames, so the highest is the steady one.
+  - `isolation_min_kohm`: the lowest `isolation_kohm` of `bms/2101`.
+  - `cell_spread_mv`: the median of `cell_max_v − cell_min_v` over the
+    `bms/2101` frames with |`hv_a`| below 5 A, so quiet frames are compared
+    with quiet frames. `cell_spread_mv_max`: the highest, over all frames.
+  - `module_temp_spread_c_max`: the highest `value` of homy's
+    `derived/module_temp_spread_c`.
+  - `aux_12v_rest`: the first valid `aux_12v` of the day that comes 6 h or
+    more after the valid one before it (a park of at least 6 h, before the
+    12 V charger lifts the voltage). With no valid reading in the 30 days
+    before, the first reading counts too.
+  - Fan: per month and `fan_status` step 1–9, the frame count and the median
+    `fan_feedback`.
+- **Garbage frames:** a value outside its physical bounds is dropped. Cell
+  voltage 1–5 V and module temperatures −40–100 °C (so a spread of 0–140 °C)
+  are the bounds of homy's `ioniq-cell-health` bot; a cell pair with max
+  below min is dropped too, as there. The others are plain sanity limits:
+  SoH 50–110 %, isolation 1–10 000 kΩ (0 means "not measured"), 12 V
+  8–16 V, fan feedback 0–255. The numbers are in `health.py`.
+- **Load and cache:** past days do not change, so each day before yesterday
+  is read once, in one InfluxDB read per month, and kept in the SQLite
+  `health_days` table (a day without car data too, as an empty row).
+  Yesterday and today are read on each request and not kept. Raw frames are
+  read, not InfluxDB aggregates, so the rules stay in Python and the tests
+  check them with made-up frames.
+
 ## Storage and outputs
 
-- The store (places, routes, upkeep items, tyre sets and swaps, labels, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
+- The store (places, routes, upkeep items, tyre sets and swaps, labels, the health days cache, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
 - Outputs:
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
   - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, the upkeep items that are due, and the tyre set on now with its hint) for a Home Assistant view in homy.
