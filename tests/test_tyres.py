@@ -6,9 +6,11 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import TOKEN, CheckedClient
 
-from ev_journal import places
+from ev_journal import places, source
 from ev_journal.api import create_app
-from ev_journal.tyres import Rules, age_years, dot_date, km_per_set, overview
+from ev_journal.settings import Settings
+from ev_journal.source import DAY
+from ev_journal.tyres import Rules, age_years, dot_date, km_per_set, mqtt_part, overview
 
 TODAY = date(2030, 6, 15)
 RULES = Rules()
@@ -178,3 +180,38 @@ def test_api_delete_and_swap_errors(api, env):
     env["odo"] = None
     assert api.post("/tyres/swaps", json={"set_id": s}).status_code == 422
     assert api.post("/tyres/swaps", json={"set_id": s, "km": 10}).status_code == 201
+
+
+class FakeInflux:
+    def __init__(self, by_group):
+        self.by_group, self.queries = by_group, []
+
+    def query(self, q):
+        self.queries.append(q)
+        return next(rows for g, rows in self.by_group.items() if f"'{g}'" in q)
+
+
+def test_outside_temps_one_mean_per_day():
+    db = FakeInflux(
+        {
+            "ambient": [{"time": 2 * DAY, "mean": 4}, {"time": DAY, "mean": 6}],
+            "hvac": [{"time": 2 * DAY, "mean": 6}, {"time": 3 * DAY, "mean": None}],
+        }
+    )
+    assert source.outside_temps(db, 0, "UTC") == [6, 5]  # day 3 had no reading
+    assert "tz('UTC')" in db.queries[0] and "mean(outdoor_c)" in db.queries[1]
+
+
+def test_tyres_mqtt_part():
+    o = overview([tset("a", "summer", "0721")], [swap("a", 0)], TODAY, 10, [], RULES)
+    assert mqtt_part(o) == {
+        "fitted": {"name": "Test a", "season": "summer", "age_years": 9.3},
+        "hint": None,
+        "age_warning": ["Test a"],
+    }
+    assert mqtt_part(overview([], [], TODAY, None, [], RULES))["fitted"] is None
+
+
+def test_tyre_settings():
+    s = Settings.from_env({"EVJ_TYRE_MAX_AGE_YEARS": "5", "EVJ_TYRE_SWAP_DAYS": "3"})
+    assert (s.tyre_max_age_years, s.tyre_swap_c, s.tyre_swap_days) == (5, 7, 3)

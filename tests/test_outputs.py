@@ -53,3 +53,6 @@ def test_summary():
     assert s["upkeep"] == []
     part = [{"name": "Test item", "status": "soon"}]
     assert outputs.summary(r, r.journeys[-1].end, UTC, part)["upkeep"] == part
+    assert s["tyres"] == {"fitted": None, "hint": None, "age_warning": []}
+    ty = {"fitted": {"name": "Test set"}, "hint": "winter", "age_warning": []}
+    assert outputs.summary(r, r.journeys[-1].end, UTC, None, ty)["tyres"] == ty

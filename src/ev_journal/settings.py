@@ -47,6 +47,9 @@ class Settings:
     departures: dict[str, str | None] = field(default_factory=dict)  # day type -> HH:MM
     day_ranges: tuple[tuple[str, date, date], ...] = ()  # (day type, first, last)
     plug_check_at: str | None = "22:30"  # HH:MM local; None: no plug check (#43)
+    tyre_max_age_years: float = 6.0  # (#45)
+    tyre_swap_c: float = 7.0
+    tyre_swap_days: int = 7
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -82,6 +85,9 @@ class Settings:
             },
             day_ranges=_ranges(e.get("EVJ_DAY_TYPES", "")),
             plug_check_at=_hhmm(_none(e.get("EVJ_PLUG_CHECK_AT", "22:30"))),
+            tyre_max_age_years=float(e.get("EVJ_TYRE_MAX_AGE_YEARS", "6")),
+            tyre_swap_c=float(e.get("EVJ_TYRE_SWAP_C", "7")),
+            tyre_swap_days=_positive(e.get("EVJ_TYRE_SWAP_DAYS", "7")),
         )._checked()
 
     def _checked(self) -> "Settings":
