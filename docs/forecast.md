@@ -274,3 +274,24 @@ check runs once per evening: when it fails, or the car comes home later, no
 second check follows. Each notice has the id `plug_check:<local date>`; the
 SQLite store keeps every sent id, so a second run or a restart never sends
 it again. `dry-run` prints what the check would decide now, and why.
+
+### Does the meter show the cable?
+
+No. On the real history (read 2026-11-13) the charger meter reads 0 W at
+idle, whether the car is plugged in and waiting for its timer or not
+connected at all. It shows no standby draw of the charger or the car. The
+meter gives whole watts, one sample every 8 s; while charging it reads about
+1,220 W.
+
+| meter at idle (≤ 150 W) | windows | samples | median | p10 | p90 | max |
+|---|---|---|---|---|---|---|
+| plugged, waiting: charge session open, no charging yet | 115 | 116,710 | 0 W | 0 W | 0 W | 149 W |
+| no car: the car is on a trip | 685 | 82,017 | 0 W | 0 W | 0 W | 0 W |
+| car at home, last frame says cable out | 349 | 11,517 | 0 W | 0 W | 0 W | 26 W |
+
+In the first row, 116,680 samples are exactly 0 W; the other 30 are the
+ramp at the start of charging. So the meter adds no plug signal while the
+car app sleeps, and the rule above stays. The car's `plugged-waiting` state
+is not in the data: the car sleeps while it waits, and only 5 of 117 charge
+sessions have a cable-in frame in the 14 h before they start. That is why
+"unknown" is a common case and sends the notice.
