@@ -43,6 +43,7 @@ environment points to.
 | `EVJ_TIMER_STEP_MIN` | step of the car's charge timer, minutes | `15` |
 | `EVJ_RESERVE_PCT` | SoC % added to the bad-day need | `10` |
 | `EVJ_PREHEAT` | `1` when a weekday preheat is set in the car | — |
+| `EVJ_PLUG_CHECK_AT` | time of the evening plug check, `HH:MM` local, or `none` (off) ([forecast](docs/forecast.md#plug-check)) | `22:30` |
 
 ## Run
 

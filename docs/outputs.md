@@ -171,6 +171,25 @@ home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`
 when the meter has shown no charging for 2 min; `min_to_target` is then
 `null`.
 
+### Notices
+
+Topic `homy/ioniq/notice`, QoS 1, **not retained**. JSON:
+
+```json
+{"id": "plug_check:2026-01-10", "kind": "plug_check", "time": "2026-01-10T22:30:00+02:00",
+ "text": "Колата не е включена за зареждане. Утре: …"}
+```
+
+A message for a person; homy sends it on (Telegram). `id` is the same for
+every copy of one notice, so a receiver can drop a repeat; ev-journal never
+sends the same `id` twice, also after a restart. `time` is local ISO time.
+`text` is Bulgarian. Kinds:
+
+- `plug_check`: the evening plug check ([forecast.md](forecast.md#plug-check));
+  `id` is `plug_check:<local date>`.
+
+Later notices (upkeep reminders) use the same topic with their own `kind`.
+
 ## Places seed
 
 `EVJ_PLACES_FILE` points to a JSON list outside the repo. It is imported once

@@ -237,3 +237,40 @@ the last 90 days (the last `soc` and the last `soc_display` of each hour).
 With fewer than 20 pairs, or pairs that span less than 20 BMS %, it is the line through the two points above
 (a = −1.51, b = 1.065). Sending it (Telegram or a Home
 Assistant notification) is done outside this repo.
+
+## Plug check
+
+Each evening at `EVJ_PLUG_CHECK_AT` (`HH:MM` local time, default `22:30`;
+`none` turns it off) ev-journal reads fresh data from InfluxDB and publishes
+a notice on `homy/ioniq/notice` ([outputs.md](outputs.md#notices)) when all
+of these hold:
+
+1. **A charge is needed**: the advice for tomorrow has a `level`.
+2. **The car is at home**: the last trip ended at the `home` place, and no
+   trip (also one still running) started after it.
+3. **The car is not known to be plugged in.**
+
+The car app reads the car only while the car powers it, so the plug state
+comes from what was seen since the end of the last trip:
+
+- **plugged**: the house charger meter (`xymd1`, device `charger`) showed
+  charging power (above 150 W, as for home charges), or the last car frame
+  says the cable is in: `bcm_b00e charge_connector = 1`, or `bms/2101`
+  `ac_port = 1` or `dc_port = 1`;
+- **out**: the last car frame says the cable is out, and the meter showed no
+  charging power;
+- **unknown**: no car frame since the trip end.
+
+No charging power at the check time does **not** mean "not plugged": the
+car's charge timer often starts later. So the meter alone only says
+"plugged".
+
+The text is "Колата не е включена за зареждане." (out) or "Не виждам дали
+колата е включена." (unknown), then the advice `message`. Unknown sends too:
+a missed charge costs more than one extra message.
+
+The loop wakes up for the check time; it does not wait for its next run. The
+check runs once per evening: when it fails, or the car comes home later, no
+second check follows. Each notice has the id `plug_check:<local date>`; the
+SQLite store keeps every sent id, so a second run or a restart never sends
+it again. `dry-run` prints what the check would decide now, and why.
