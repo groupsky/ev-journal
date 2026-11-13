@@ -71,8 +71,9 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
   vignette and so on). **Service items** are due after some months, some km,
   or both, whichever comes first ([#44](https://github.com/groupsky/ev-journal/issues/44)).
 - They live in the same SQLite file (`upkeep_items`, with the sync rules of
-  places, and `upkeep_log`, one row per "done"). The car app, the voice
-  assistant and later reminders read them through the API ([api.md](api.md#upkeep)).
+  places, and `upkeep_log`, one row per "done"). The car app and the voice
+  assistant read them through the API ([api.md](api.md#upkeep)); the run
+  sends reminders as notices ([outputs.md](outputs.md#notices)).
 - The km come from the last odometer reading in InfluxDB, read on each
   request. Status is `overdue`, `soon` (inside the first reminder days or
   the reminder km) or `ok`.

@@ -4,8 +4,8 @@ loop (the default): run every EVJ_INTERVAL_SEC seconds, run the plug check
   at EVJ_PLUG_CHECK_AT, and serve the API on EVJ_API_PORT when
   EVJ_API_TOKEN_FILE is set.
 run: read, recompute everything, write to InfluxDB and MQTT once.
-dry-run: read and recompute, print counts per month and what the plug check
-  would decide now, write nothing.
+dry-run: read and recompute, print counts per month, what the plug check
+  would decide now and the reminders it would send, write nothing.
 """
 
 import shutil
@@ -27,6 +27,7 @@ from ev_journal import (
     places,
     plugcheck,
     price,
+    reminders,
     source,
     track,
     tyres,
@@ -186,6 +187,10 @@ def run(s: Settings) -> Result:
             publish_home(s)
         except Exception as e:  # a side output: the run goes on
             print(f"ev-journal: home place publish failed: {e!r}", file=sys.stderr)
+        try:
+            send_reminders(s, now)
+        except Exception as e:  # a side output: the run goes on
+            print(f"ev-journal: reminders failed: {e!r}", file=sys.stderr)
     reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     deleted = cleanup.cleanup(reader, db, r)
     try:
@@ -260,6 +265,46 @@ def tyres_part(s: Settings, now: int) -> dict:
         return tyres.mqtt_part(o)
     finally:
         store.close()
+
+
+def reminder_inputs(s: Settings, store, now: int) -> tuple[list[dict], dict | None, datetime]:
+    """The upkeep items, the tyre overview and now in local time. The tyre
+    overview is None with fewer than EVJ_TYRE_SWAP_DAYS days of outside
+    temperature, so a gap in the readings does not look like a gone hint."""
+    odo = odometer_now(s)
+    km = odo[1] if odo else None
+    local = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz))
+    items = upkeep.items(store, local.date(), km)
+    try:
+        temps = outside_temps(s)
+    except Exception as e:
+        print(f"ev-journal: no tyre reminders: {e!r}", file=sys.stderr)
+        return items, None, local
+    if len(temps) < s.tyre_swap_days:
+        return items, None, local
+    sets, swaps = tyres.load(store)
+    return items, tyres.overview(sets, swaps, local.date(), km, temps, tyre_rules(s)), local
+
+
+def send_reminders(s: Settings, now: int) -> None:
+    """Upkeep and tyre reminders, once per threshold (#46)."""
+    from ev_journal import mqtt
+
+    store = places.open_store(s.data_dir)
+    try:
+        items, ty, local = reminder_inputs(s, store, now)
+        sent = reminders.run(
+            store,
+            items,
+            ty,
+            now,
+            local,
+            lambda m: mqtt.publish(s.mqtt_url, m, mqtt.NOTICE_TOPIC, retain=False),
+        )
+    finally:
+        store.close()
+    if sent:
+        print(f"ev-journal: {len(sent)} reminders sent")
 
 
 def publish_home_soon(s: Settings) -> None:
@@ -499,6 +544,19 @@ def dry_run(s: Settings) -> None:
             f" matched {share:.0f} %"
         )
         db.close()
+        db = places.open_store(tmp)
+        try:
+            now = int(time.time() * 1000)
+            items, ty, local = reminder_inputs(s, db, now)
+            due = reminders.pending(db, items, ty, now, local)
+            when = "now" if reminders.in_window(local) else "at 08:00"
+            print(f"reminders to send {when}: {len(due)}")
+            for n in due:
+                print(f"  {n['id']}: {n['text']}")
+        except Exception as e:  # a side output: the rest is printed already
+            print(f"reminders: failed: {e!r}")
+        finally:
+            db.close()
     finally:
         shutil.rmtree(tmp)
 
