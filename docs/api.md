@@ -136,6 +136,44 @@ command and changes nothing.
 `POST /questions/{id}/answer` and `GET /charges/price-estimate`: see
 [charges.md](charges.md).
 
+## Upkeep
+
+The car's papers (run out on a date) and service items (due by months, by
+km, or both, whichever comes first). See [design.md](design.md#upkeep).
+
+| method | path | does |
+|---|---|---|
+| `GET` | `/upkeep` | `km_now`, `km_now_time` and all items with their status, the most urgent first |
+| `POST` | `/upkeep` | create; the server picks the id |
+| `GET` | `/upkeep/{id}` | one item with its status |
+| `PUT` | `/upkeep/{id}` | change |
+| `DELETE` | `/upkeep/{id}` | delete (a delete marker, like places) |
+| `POST` | `/upkeep/{id}/done` | log that it was done; returns the item |
+| `GET` | `/upkeep/{id}/log` | what was done, newest first |
+
+An item: `name`, `kind` (`paper` or `service`), `due_date` (a paper),
+`every_months` and `every_km` (a service item, either or both), `last_date`,
+`last_km`, `remind_days` (default `[30, 7]`), `remind_km` (default `1000`),
+`note`. Dates are `YYYY-MM-DD`. Errors and versions work as for places.
+
+Each item also gets:
+
+- `next_date`: `due_date` for a paper; `last_date` + `every_months` for a
+  service item (the 31st becomes the last day of a short month).
+- `next_km`: `last_km` + `every_km`.
+- `days_left` (from today, local time) and `km_left` (from `km_now`, the last
+  odometer reading in InfluxDB). `km_left` is `null` when there is no
+  odometer reading yet; the date still works.
+- `status`: `overdue` when past the date or the km; `soon` within
+  `remind_days[0]` days or `remind_km` km; else `ok`. Whichever comes first
+  decides.
+
+`POST /upkeep/{id}/done` takes `{"date"?, "km"?, "due_date"?, "note"?}`.
+`date` defaults to today and `km` to `km_now`. It writes a log row and sets
+`last_date` and `last_km` (with no km at all, `last_km` stays as it was).
+When the odometer cannot be read, `km_now` is `null`, as with no reading. A paper needs the new `due_date` (`422`
+without it); it replaces the old one.
+
 ## Advice
 
 `GET /advice`: tomorrow's forecast and charging advice from the last

@@ -81,6 +81,14 @@ def odometer(db: Influx, start: int, end: int) -> list[tuple[int, float]]:
     return [(int(r["time"]), float(r["last"])) for r in rows if r["last"] is not None]
 
 
+def last_odometer(db: Influx) -> tuple[int, float] | None:
+    """The car's last odometer reading: (t, km), or None if there is none (#44)."""
+    rows = db.query("SELECT last(km) FROM ioniq WHERE \"group\" = 'odometer'")
+    if not rows or rows[0]["last"] is None:
+        return None
+    return int(rows[0]["time"]), float(rows[0]["last"])
+
+
 def home_costs(db: Influx) -> dict[int, float]:
     """Cost of each home charge from ioniq_charges, by charge start (ms).
 

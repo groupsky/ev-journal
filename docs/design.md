@@ -65,12 +65,26 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
 - **New places**: frequent stops without a name are offered for naming.
 - **Command log**: the assistant POSTs each voice command, with an offline queue. A navigate or multi-stop command gives the journey's plan at its start.
 
+## Upkeep
+
+- The car's **papers** run out on a date (technical inspection, insurance,
+  vignette and so on). **Service items** are due after some months, some km,
+  or both, whichever comes first ([#44](https://github.com/groupsky/ev-journal/issues/44)).
+- They live in the same SQLite file (`upkeep_items`, with the sync rules of
+  places, and `upkeep_log`, one row per "done"). The car app, the voice
+  assistant and later reminders read them through the API ([api.md](api.md#upkeep)).
+- The km come from the last odometer reading in InfluxDB, read on each
+  request. Status is `overdue`, `soon` (inside the first reminder days or
+  the reminder km) or `ok`.
+- The real items, dates and km are data. They are entered through the API
+  and never go into the repo.
+
 ## Storage and outputs
 
-- The store (places, routes, labels, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
+- The store (places, routes, upkeep items, labels, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
 - Outputs:
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
-  - A retained MQTT summary (the last 10 journeys, the month, and cost per kWh and per 100 km for all time and the last 30 days) for a Home Assistant view in homy.
+  - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, and the upkeep items that are due) for a Home Assistant view in homy.
   - Notices on MQTT (not retained), for example the evening plug check; homy sends them on to a person ([outputs.md](outputs.md#notices)).
   - The home place on MQTT (retained), so homy can tell when the car leaves home ([outputs.md](outputs.md#home-place)).
 
