@@ -173,3 +173,30 @@ def plug_frames(db: Influx, start: int) -> list[tuple[int, bool]]:
             if vals:
                 out.append((int(r["time"]), any(float(v) == 1 for v in vals)))
     return out
+
+
+def health_frames(db: Influx, start: int, end: int):
+    """Raw frames for the health series in [start, end) (#49)."""
+    from ev_journal.health import AUX_V, Frames
+
+    w = f" AND time >= {start}ms AND time < {end}ms"
+    bms = db.query(
+        "SELECT isolation_kohm, cell_max_v, cell_min_v, hv_a, aux_12v, fan_status, fan_feedback"
+        " FROM ioniq WHERE \"group\" = 'bms/2101'" + w
+    )
+    soh = db.query("SELECT soh FROM ioniq WHERE \"group\" = 'bms/2105'" + w)
+    spread = db.query(
+        "SELECT value FROM ioniq WHERE \"group\" = 'derived/module_temp_spread_c'" + w
+    )
+    # No valid 12 V reading in the 30 days before counts as a long park.
+    prev = db.query(
+        "SELECT last(aux_12v) FROM ioniq WHERE \"group\" = 'bms/2101'"
+        f" AND aux_12v >= {AUX_V[0]} AND aux_12v <= {AUX_V[1]}"
+        f" AND time >= {start - 30 * DAY}ms AND time < {start}ms"
+    )
+    return Frames(
+        bms=[{k: (v if k == "time" else _f(v)) for k, v in r.items()} for r in bms],
+        soh=[(int(r["time"]), _f(r["soh"])) for r in soh],
+        module_spread=[(int(r["time"]), _f(r["value"])) for r in spread],
+        last_aux_before=int(prev[0]["time"]) if prev else None,
+    )

@@ -394,6 +394,129 @@
         "title": "EstimateStation",
         "type": "object"
       },
+      "FanRow": {
+        "properties": {
+          "count": {
+            "description": "Frames at this step in the month.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "fan_feedback_median": {
+            "title": "Fan Feedback Median",
+            "type": "number"
+          },
+          "month": {
+            "description": "YYYY-MM.",
+            "title": "Month",
+            "type": "string"
+          },
+          "step": {
+            "description": "fan_status, 1\u20139.",
+            "title": "Step",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "month",
+          "step",
+          "count",
+          "fan_feedback_median"
+        ],
+        "title": "FanRow",
+        "type": "object"
+      },
+      "HealthDay": {
+        "properties": {
+          "aux_12v_rest": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first 12 V reading after a park of at least 6 h, V.",
+            "title": "Aux 12V Rest"
+          },
+          "cell_spread_mv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median cell spread (max \u2212 min cell voltage), mV, over frames with |hv_a| below 5 A.",
+            "title": "Cell Spread Mv"
+          },
+          "cell_spread_mv_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day's highest cell spread, mV.",
+            "title": "Cell Spread Mv Max"
+          },
+          "day": {
+            "description": "Local day, YYYY-MM-DD.",
+            "title": "Day",
+            "type": "string"
+          },
+          "isolation_min_kohm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day's lowest isolation, k\u03a9.",
+            "title": "Isolation Min Kohm"
+          },
+          "module_temp_spread_c_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day's highest module temperature spread, \u00b0C.",
+            "title": "Module Temp Spread C Max"
+          },
+          "soh_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day's highest SoH, % (bms/2105 soh).",
+            "title": "Soh Max"
+          }
+        },
+        "required": [
+          "day",
+          "soh_max",
+          "isolation_min_kohm",
+          "cell_spread_mv",
+          "cell_spread_mv_max",
+          "module_temp_spread_c_max",
+          "aux_12v_rest"
+        ],
+        "title": "HealthDay",
+        "type": "object"
+      },
       "JourneyDay": {
         "description": "The journeys that start on one local day, summed.",
         "properties": {
@@ -2276,6 +2399,132 @@
           }
         },
         "summary": "Post Command"
+      }
+    },
+    "/health/daily": {
+      "get": {
+        "description": "One row per local day with car data, oldest first. A field is\nnull on a day without a valid value. Rules: docs/design.md.",
+        "operationId": "get_health_daily_health_daily_get",
+        "parameters": [
+          {
+            "description": "First local day.",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First local day.",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last local day.",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last local day.",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HealthDay"
+                  },
+                  "title": "Response Get Health Daily Health Daily Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Health Daily"
+      }
+    },
+    "/health/fan": {
+      "get": {
+        "description": "Per month and fan step: frame count and median fan_feedback, over\nthe last `months` months with this one, oldest first.",
+        "operationId": "get_health_fan_health_fan_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 120,
+              "minimum": 1,
+              "title": "Months",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FanRow"
+                  },
+                  "title": "Response Get Health Fan Health Fan Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Health Fan"
       }
     },
     "/journeys": {
