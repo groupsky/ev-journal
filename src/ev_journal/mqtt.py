@@ -1,4 +1,4 @@
-"""Publish the retained summary."""
+"""Publish to MQTT: the retained summary and the notices."""
 
 import json
 import urllib.parse
@@ -7,9 +7,10 @@ from urllib.parse import unquote
 import paho.mqtt.client as mqtt
 
 TOPIC = "homy/ioniq/journeys"
+NOTICE_TOPIC = "homy/ioniq/notice"
 
 
-def publish(url: str, payload: dict, topic: str = TOPIC) -> None:
+def publish(url: str, payload: dict, topic: str = TOPIC, retain: bool = True) -> None:
     u = urllib.parse.urlparse(url)
     c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="ev-journal")
     if u.username:
@@ -17,7 +18,7 @@ def publish(url: str, payload: dict, topic: str = TOPIC) -> None:
     c.connect(u.hostname, u.port or 1883)
     c.loop_start()
     try:
-        info = c.publish(topic, json.dumps(payload), qos=1, retain=True)
+        info = c.publish(topic, json.dumps(payload), qos=1, retain=retain)
         info.wait_for_publish(timeout=30)
         if not info.is_published():
             raise RuntimeError(f"MQTT publish to {topic} not confirmed")

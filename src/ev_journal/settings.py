@@ -46,6 +46,7 @@ class Settings:
     timer_step_min: int = 15
     departures: dict[str, str | None] = field(default_factory=dict)  # day type -> HH:MM
     day_ranges: tuple[tuple[str, date, date], ...] = ()  # (day type, first, last)
+    plug_check_at: str | None = "22:30"  # HH:MM local; None: no plug check (#43)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -75,11 +76,12 @@ class Settings:
             preheat=e.get("EVJ_PREHEAT", "") in ("1", "true", "yes"),
             timer_step_min=_positive(e.get("EVJ_TIMER_STEP_MIN", "15")),
             departures={
-                k[len(DEPARTURE_PREFIX) :].lower(): _hhmm(None if v.lower() == "none" else v)
+                k[len(DEPARTURE_PREFIX) :].lower(): _hhmm(_none(v))
                 for k, v in e.items()
                 if k.startswith(DEPARTURE_PREFIX) and len(k) > len(DEPARTURE_PREFIX)
             },
             day_ranges=_ranges(e.get("EVJ_DAY_TYPES", "")),
+            plug_check_at=_hhmm(_none(e.get("EVJ_PLUG_CHECK_AT", "22:30"))),
         )._checked()
 
     def _checked(self) -> "Settings":
@@ -95,6 +97,10 @@ def _hhmm(v: str | None) -> str | None:
     if v is not None:
         time.fromisoformat(v)
     return v
+
+
+def _none(v: str) -> str | None:
+    return None if v.lower() == "none" else v
 
 
 def _ranges(v: str) -> tuple[tuple[str, date, date], ...]:

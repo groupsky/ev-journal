@@ -1,9 +1,11 @@
 """ev-journal [loop|run|dry-run]
 
-loop (the default): run every EVJ_INTERVAL_SEC seconds, and serve the API
-  on EVJ_API_PORT when EVJ_API_TOKEN_FILE is set.
+loop (the default): run every EVJ_INTERVAL_SEC seconds, run the plug check
+  at EVJ_PLUG_CHECK_AT, and serve the API on EVJ_API_PORT when
+  EVJ_API_TOKEN_FILE is set.
 run: read, recompute everything, write to InfluxDB and MQTT once.
-dry-run: read and recompute, print counts per month, write nothing.
+dry-run: read and recompute, print counts per month and what the plug check
+  would decide now, write nothing.
 """
 
 import shutil
@@ -12,10 +14,22 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ev_journal import charges, cleanup, forecast, homecharge, outputs, places, price, source, track
+from ev_journal import (
+    charges,
+    cleanup,
+    forecast,
+    homecharge,
+    outputs,
+    places,
+    plugcheck,
+    price,
+    source,
+    track,
+)
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build, month_key
 from ev_journal.settings import Settings
@@ -166,6 +180,45 @@ def run(s: Settings) -> Result:
         f"{deleted} stale deleted, station feed {feed}"
     )
     return r
+
+
+def plug_decision(s: Settings, r: Result, now: int) -> tuple[str | None, str]:
+    """The plug check on fresh data: (notice text or None, the reason)."""
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    last = r.trips[-1] if r.trips else None
+    at_home = (
+        last is not None
+        and last.end_place is not None
+        and last.end_place.kind == "home"
+        and not source.moved_after(db, last.end)
+    )
+    state = "unknown"
+    if at_home:
+        meter = [w for _t, w, _e in source.meter_minutes(db, last.end, now)]
+        state = plugcheck.plug_state(source.plug_frames(db, last.end), meter)
+    return plugcheck.decide(r.advice, at_home, state)
+
+
+def plug_check(s: Settings, at: int) -> None:
+    """Read fresh data, decide, and publish the notice once per evening (#43).
+    at: the planned check time; it gives the notice id and time."""
+    r = compute(s)
+    now = int(time.time() * 1000)
+    text, why = plug_decision(s, r, now)
+    print(f"ev-journal: plug check: {why}")
+    if text is None or not s.mqtt_url:
+        return
+    from ev_journal import mqtt
+
+    local = datetime.fromtimestamp(at / 1000, ZoneInfo(s.tz))
+    n = plugcheck.notice(local.date().isoformat(), local.isoformat(timespec="seconds"), text)
+    store = places.open_store(s.data_dir)
+    try:
+        plugcheck.send(
+            store, n, lambda m: mqtt.publish(s.mqtt_url, m, mqtt.NOTICE_TOPIC, retain=False), now
+        )
+    finally:
+        store.close()
 
 
 def journey_ends(r: Result) -> list[tuple[int, float, float]]:
@@ -320,6 +373,11 @@ def dry_run(s: Settings) -> None:
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
             f" level {r.advice['level']}, capped {r.advice['capped']}"
         )
+    if s.plug_check_at:
+        text, why = plug_decision(s, r, int(time.time() * 1000))
+        print(f"plug check at {s.plug_check_at}: {why}; notice: {'yes' if text else 'no'}")
+    else:
+        print("plug check: off")
     labels = {}
     for j in r.journeys:
         labels[j.label] = labels.get(j.label, 0) + 1
@@ -366,7 +424,22 @@ def main() -> None:
         }
         if s.api_token:
             serve_api(s, state)
+        tz, next_run = ZoneInfo(s.tz), 0
+        now = int(time.time() * 1000)
+        next_check = plugcheck.next_at(now, s.plug_check_at, tz) if s.plug_check_at else None
         while True:
+            now = int(time.time() * 1000)
+            if next_check is not None and now >= next_check:
+                try:
+                    plug_check(s, next_check)
+                except Exception as e:  # one try per evening
+                    print(f"ev-journal: plug check failed: {e!r}", file=sys.stderr)
+                next_check = plugcheck.next_at(now, s.plug_check_at, tz)
+                continue
+            if now < next_run:
+                time.sleep((min(next_run, next_check or next_run) - now) / 1000)
+                continue
+            next_run = now + s.interval_sec * 1000
             try:
                 r = run(s)
                 state["stops"] = journey_ends(r)
@@ -377,7 +450,6 @@ def main() -> None:
                 state["journey_items"] = [outputs.journey_item(j) for j in r.journeys]
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
-            time.sleep(s.interval_sec)
     else:
         sys.exit(__doc__)
 
