@@ -293,6 +293,6 @@ meter gives whole watts, one sample every 8 s; while charging it reads about
 In the first row, 116,680 samples are exactly 0 W; the other 30 are the
 ramp at the start of charging. So the meter adds no plug signal while the
 car app sleeps, and the rule above stays. The car's `plugged-waiting` state
-is not in the data: the car sleeps while it waits, and only 5 of 117 charge
-sessions have a cable-in frame in the 14 h before they start. That is why
+is not in the data: the car sleeps while it waits, and only 5 of 117 home charges had a
+cable-in frame before the charge. That is why
 "unknown" is a common case and sends the notice.
