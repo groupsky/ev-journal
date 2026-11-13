@@ -91,3 +91,74 @@ def test_plug_check_setting():
     for bad in ("25:00", "late", ""):
         with pytest.raises(ValueError):
             Settings.from_env({"EVJ_PLUG_CHECK_AT": bad})
+
+
+class FakeInflux:
+    """Answers the plug check's queries from made-up rows."""
+
+    def __init__(self, *_a, frames=(), watts=(), trip_after=False):
+        self.frames, self.watts, self.trip_after = frames, watts, trip_after
+
+    def query(self, q):
+        if "ioniq_sessions" in q:
+            return [{"time": ARRIVED + 1}] if self.trip_after else []
+        if "bcm_b00e" in q:
+            return [{"time": t, "charge_connector": v} for t, v in self.frames]
+        if "xymd1" in q:
+            return [
+                {"time": ARRIVED + i * 60_000, "w": w, "e": 1.0} for i, w in enumerate(self.watts)
+            ]
+        return []
+
+
+def run_check(monkeypatch, tmp_path, kind="home", **fake):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+    from ev_journal import mqtt
+    from ev_journal.journeys import Result, Trip
+
+    home = places.Place("1", "Test Home", kind, 0.1, 0.1, 100)
+    trip = Trip(start=ARRIVED - 600_000, end=ARRIVED, end_place=home)
+    r = Result(trips=[trip], journeys=[], outings=[], months=[])
+    r.advice = ADVICE
+    sent = []
+    monkeypatch.setattr(cli, "compute", lambda s: r)
+    monkeypatch.setattr(cli, "Influx", lambda *a: FakeInflux(**fake))
+    monkeypatch.setattr(
+        mqtt, "publish", lambda url, m, topic, retain: sent.append((topic, retain, m))
+    )
+    s = SimpleNamespace(
+        influx_url="",
+        influx_db="",
+        influx_read_user=None,
+        influx_read_password=None,
+        mqtt_url="mqtt://broker",
+        tz="Europe/Sofia",
+        data_dir=tmp_path,
+    )
+    cli.plug_check(s)
+    cli.plug_check(s)  # the same evening again: nothing new
+    return sent
+
+
+def test_check_publishes_one_notice_not_retained(monkeypatch, tmp_path):
+    sent = run_check(monkeypatch, tmp_path, frames=[(ARRIVED + 60_000, 0)])
+    assert len(sent) == 1
+    topic, retain, m = sent[0]
+    assert topic == "homy/ioniq/notice" and retain is False
+    assert m["kind"] == "plug_check" and m["id"].startswith("plug_check:")
+    assert m["text"].startswith(plugcheck.TEXT_OUT)
+
+
+@pytest.mark.parametrize(
+    "kind, fake",
+    [
+        ("home", {"frames": [(ARRIVED + 60_000, 1)]}),
+        ("home", {"watts": [0.0, 3_600.0]}),
+        ("home", {"trip_after": True}),
+        ("work", {}),
+    ],
+)
+def test_check_sends_nothing(monkeypatch, tmp_path, kind, fake):
+    assert run_check(monkeypatch, tmp_path, kind, **fake) == []

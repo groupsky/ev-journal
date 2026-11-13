@@ -302,7 +302,7 @@ def test_dry_run_prints_every_tried_choice(monkeypatch, capsys, tmp_path):
     r.level_months = {"2026-11": forecast.level_rates([_night(15.4, 14.3, 8.0)])}
     monkeypatch.setattr(cli, "compute", lambda s: r)
     monkeypatch.setattr(cli, "away", lambda *a: "-")
-    cli.dry_run(SimpleNamespace(data_dir=tmp_path))
+    cli.dry_run(SimpleNamespace(data_dir=tmp_path, plug_check_at=None))
     out = capsys.readouterr().out
     assert "workday no key" in out and "weekday" in out and "month_part" in out
     assert out.count("<- picked") == 2
@@ -392,7 +392,7 @@ def test_plan_uses_the_effects_only_when_they_win(monkeypatch, capsys, tmp_path)
     r.trips = []  # dry-run's month table needs months; not part of this test
     monkeypatch.setattr(cli, "compute", lambda s: r)
     monkeypatch.setattr(cli, "away", lambda *a: "-")
-    cli.dry_run(SimpleNamespace(data_dir=tmp_path))
+    cli.dry_run(SimpleNamespace(data_dir=tmp_path, plug_check_at=None))
     out = capsys.readouterr().out
     assert "today's rule" in out and "day_of_month  " in out and "<- used" in out
     assert "day_of_month = 5 (workday): +" in out

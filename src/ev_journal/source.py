@@ -121,3 +121,25 @@ def soc_pairs(db: Influx, start: int) -> list[tuple[float, float]]:
 
     bms, screen = hourly("bms/2101", "soc"), hourly("bms/2105", "soc_display")
     return [(bms[t], screen[t]) for t in sorted(bms.keys() & screen.keys())]
+
+
+def trip_started_after(db: Influx, t: int) -> bool:
+    """A trip row (also one still running) starts after t."""
+    rows = db.query(f"SELECT * FROM ioniq_sessions WHERE kind = 'trip' AND time > {t}ms LIMIT 1")
+    return bool(rows)
+
+
+def plug_frames(db: Influx, start: int) -> list[tuple[int, bool]]:
+    """The last car frame since start of each kind that shows the cable:
+    (time, cable in). bcm_b00e charge_connector, bms/2101 ac_port or dc_port."""
+    out = []
+    for group, fields in (("bcm_b00e", ["charge_connector"]), ("bms/2101", ["ac_port", "dc_port"])):
+        rows = db.query(
+            f"SELECT {', '.join(fields)} FROM ioniq WHERE \"group\" = '{group}'"
+            f" AND time > {start}ms ORDER BY time DESC LIMIT 1"
+        )
+        for r in rows:
+            vals = [r.get(f) for f in fields if r.get(f) is not None]
+            if vals:
+                out.append((int(r["time"]), any(float(v) == 1 for v in vals)))
+    return out
