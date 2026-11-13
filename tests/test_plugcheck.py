@@ -100,7 +100,7 @@ class FakeInflux:
         self.frames, self.watts, self.moved = frames, watts, moved
 
     def query(self, q):
-        if "speed_kph > 0" in q:
+        if "speed_kph >" in q:
             return [{"time": ARRIVED + 1, "speed_kph": 30.0}] if self.moved else []
         if "bcm_b00e" in q:
             return [{"time": t, "charge_connector": v} for t, v in self.frames]

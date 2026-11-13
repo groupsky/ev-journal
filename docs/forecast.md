@@ -247,7 +247,7 @@ of these hold:
 
 1. **A charge is needed**: the advice for tomorrow has a `level`.
 2. **The car is at home**: the last trip ended at the `home` place, and no
-   car frame after it shows speed. homy writes a trip row only when the trip
+   car frame after it shows driving speed (above 3 km/h, as in homy). homy writes a trip row only when the trip
    ends, so a trip still running is seen only by its frames.
 3. **The car is not known to be plugged in.**
 

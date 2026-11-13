@@ -123,10 +123,15 @@ def soc_pairs(db: Influx, start: int) -> list[tuple[float, float]]:
     return [(bms[t], screen[t]) for t in sorted(bms.keys() & screen.keys())]
 
 
+MOVING_KPH = 3.0  # as homy's ioniq-sessions: above this the car drives
+
+
 def moved_after(db: Influx, t: int) -> bool:
-    """A car frame after t shows speed: a trip runs or ran (homy writes a trip
-    row only when the trip ends)."""
-    rows = db.query(f"SELECT speed_kph FROM ioniq WHERE speed_kph > 0 AND time > {t}ms LIMIT 1")
+    """A car frame after t shows driving speed: a trip runs or ran (homy
+    writes a trip row only when the trip ends)."""
+    rows = db.query(
+        f"SELECT speed_kph FROM ioniq WHERE speed_kph > {MOVING_KPH} AND time > {t}ms LIMIT 1"
+    )
     return bool(rows)
 
 
