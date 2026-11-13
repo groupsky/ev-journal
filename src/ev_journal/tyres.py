@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS tyre_swaps (id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at INTEGER NOT NULL);
 """
 
-DOT = re.compile(r"^(\d\d)(\d\d)$")
+DOT = re.compile(r"([0-9]{2})([0-9]{2})")
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ def init(db: sqlite3.Connection) -> None:
 def dot_date(dot: str) -> date:
     """The Monday of the week in a DOT code WWYY ("0721": week 7 of 2021).
     ValueError for anything else."""
-    m = DOT.match(dot)
+    m = DOT.fullmatch(dot)
     week = int(m.group(1)) if m else 0
     if not 1 <= week <= 53:
         raise ValueError("a DOT code is 4 digits WWYY, week 01 to 53")
@@ -44,9 +44,10 @@ def dot_date(dot: str) -> date:
 
 
 def age_years(dot: str | None, today: date) -> float | None:
+    """Not rounded; round only to show it."""
     if not dot:
         return None
-    return round((today - dot_date(dot)).days / 365.25, 1)
+    return (today - dot_date(dot)).days / 365.25
 
 
 def km_per_set(swaps: list[dict], km_now: float | None) -> dict[str, float]:
@@ -98,7 +99,7 @@ def overview(
                 **s,
                 "retired": bool(s["retired"]),
                 "km": km.get(s["id"], 0.0),
-                "age_years": age,
+                "age_years": round(age, 1) if age is not None else None,
                 "age_warning": age is not None and age > rules.max_age_years,
                 "fitted_since": last["date"] if last and last["set_id"] == s["id"] else None,
             }

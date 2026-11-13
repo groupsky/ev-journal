@@ -237,9 +237,11 @@ def tyre_rules(s: Settings) -> tyres.Rules:
 
 
 def outside_temps(s: Settings) -> list[float]:
-    """One mean outside temperature per day with a reading, the last 30 days (#45)."""
+    """One mean outside temperature per day with a reading, over the last 30
+    days, or 3 times EVJ_TYRE_SWAP_DAYS when that is longer (#45)."""
     db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
-    return source.outside_temps(db, int(time.time() * 1000) - 30 * source.DAY, s.tz)
+    days = max(30, 3 * s.tyre_swap_days)
+    return source.outside_temps(db, int(time.time() * 1000) - days * source.DAY, s.tz)
 
 
 def tyres_part(s: Settings, now: int) -> dict:

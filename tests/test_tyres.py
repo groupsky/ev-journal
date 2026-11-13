@@ -44,11 +44,14 @@ def test_the_set_on_now_runs_to_km_now():
 
 def test_age_from_dot():
     assert dot_date("0721") == date(2021, 2, 15)  # Monday of week 7 of 2021
-    assert age_years("0721", date(2027, 2, 15)) == 6.0
+    assert round(age_years("0721", date(2027, 2, 15)), 1) == 6.0
+    # 6.03 years shows as 6.0 but is over the limit of 6.
+    o = overview([tset("a", "summer", "0720")], [], date(2026, 2, 20), None, [], RULES)
+    assert o["sets"][0]["age_years"] == 6.0 and o["age_warning"] == ["Test a"]
     assert age_years(None, TODAY) is None
 
 
-@pytest.mark.parametrize("bad", ["721", "07211", "ab21", "0021", "5421", "5321"])
+@pytest.mark.parametrize("bad", ["721", "07211", "ab21", "0021", "5421", "5321", "0721\n", "٠٧21"])
 def test_bad_dot(bad):
     # 2021 has 52 ISO weeks, so week 53 of 2021 does not exist either.
     with pytest.raises(ValueError):
@@ -162,7 +165,7 @@ def test_api_hint_and_failing_inputs(data_dir, api, env):
 
 
 def test_api_bad_dot_is_422(api):
-    for bad in ["721", "5421", "abcd", "0021"]:
+    for bad in ["721", "5421", "abcd", "0021", "0721\n"]:
         assert api.post("/tyres/sets", json={**SUMMER, "dot": bad}).status_code == 422
     assert api.post("/tyres/sets", json={**SUMMER, "dot": ""}).status_code == 201
 
@@ -215,3 +218,5 @@ def test_tyres_mqtt_part():
 def test_tyre_settings():
     s = Settings.from_env({"EVJ_TYRE_MAX_AGE_YEARS": "5", "EVJ_TYRE_SWAP_DAYS": "3"})
     assert (s.tyre_max_age_years, s.tyre_swap_c, s.tyre_swap_days) == (5, 7, 3)
+    with pytest.raises(ValueError, match="EVJ_TYRE_SWAP_DAYS"):
+        Settings.from_env({"EVJ_TYRE_SWAP_DAYS": "0"})
