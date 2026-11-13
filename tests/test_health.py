@@ -169,3 +169,25 @@ def test_api_health_routes(tmp_path):
     ]
     bad = c.get("/health/daily", params={"from": "2026-02-28", "to": "2026-02-01"})
     assert bad.status_code == 422
+
+
+def test_frames_are_read_day_by_day_and_split_on_the_row_limit():
+    from ev_journal.source import health_frames
+
+    class FakeDb:
+        def __init__(self):
+            self.windows = []
+
+        def query(self, q):
+            if "last(" in q:
+                return []
+            t0, t1 = (int(x.split("ms")[0]) for x in q.split("time >= ")[1].split(" AND time < "))
+            if t1 - t0 > 12 * H:  # this made-up server has a row limit
+                raise RuntimeError("InfluxDB returned a partial result (row limit)")
+            self.windows.append((t0, t1))
+            return [{"time": t0, "soh": 97.0}] if "soh" in q else []
+
+    db = FakeDb()
+    fr = health_frames(db, ms("2026-03-01"), ms("2026-03-02", 6))
+    assert [t for t, _v in fr.soh] == [ms("2026-03-01"), ms("2026-03-01", 12), ms("2026-03-02")]
+    assert all(t1 - t0 <= 12 * H for t0, t1 in db.windows)

@@ -175,18 +175,35 @@ def plug_frames(db: Influx, start: int) -> list[tuple[int, bool]]:
     return out
 
 
+def _windowed(db: Influx, q: str, start: int, end: int, step: int = DAY) -> list[dict]:
+    """Rows of q (ends with a WHERE) in [start, end), read in windows of step.
+    A window that hits the row limit is read again in two halves."""
+    out = []
+    for t0 in range(start, end, step):
+        t1 = min(t0 + step, end)
+        try:
+            out += db.query(f"{q} AND time >= {t0}ms AND time < {t1}ms")
+        except RuntimeError as e:
+            if "partial" not in str(e) or t1 - t0 < 2:
+                raise
+            out += _windowed(db, q, t0, t1, (t1 - t0 + 1) // 2)
+    return out
+
+
 def health_frames(db: Influx, start: int, end: int):
-    """Raw frames for the health series in [start, end) (#49)."""
+    """Raw frames for the health series in [start, end), read day by day (#49)."""
     from ev_journal.health import AUX_V, Frames
 
-    w = f" AND time >= {start}ms AND time < {end}ms"
-    bms = db.query(
+    bms = _windowed(
+        db,
         "SELECT isolation_kohm, cell_max_v, cell_min_v, hv_a, aux_12v, fan_status, fan_feedback"
-        " FROM ioniq WHERE \"group\" = 'bms/2101'" + w
+        " FROM ioniq WHERE \"group\" = 'bms/2101'",
+        start,
+        end,
     )
-    soh = db.query("SELECT soh FROM ioniq WHERE \"group\" = 'bms/2105'" + w)
-    spread = db.query(
-        "SELECT value FROM ioniq WHERE \"group\" = 'derived/module_temp_spread_c'" + w
+    soh = _windowed(db, "SELECT soh FROM ioniq WHERE \"group\" = 'bms/2105'", start, end)
+    spread = _windowed(
+        db, "SELECT value FROM ioniq WHERE \"group\" = 'derived/module_temp_spread_c'", start, end
     )
     # No valid 12 V reading in the 30 days before counts as a long park.
     prev = db.query(
