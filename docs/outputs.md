@@ -201,7 +201,29 @@ sends the same `id` twice, also after a restart. `time` is local ISO time.
 - `plug_check`: the evening plug check ([forecast.md](forecast.md#plug-check));
   `id` is `plug_check:<local date>`.
 
-Later notices (upkeep reminders) use the same topic with their own `kind`.
+- `upkeep`: an upkeep item ([api.md](api.md#upkeep)) is near or past its
+  due date or km. One notice per threshold:
+  - `upkeep:<item id>:<next_date>:<N>d`: `next_date` is `N` days away or
+    less, for each `N` in `remind_days` (default 30 and 7). Only the nearest
+    threshold is sent, so an item added 5 days before its date gets one
+    notice, not two.
+  - `upkeep:<item id>:<next_km>:<remind_km>km`: `km_left` is at or under
+    `remind_km` (default 1 000).
+  - `upkeep:<item id>:<next_date or next_km>:overdue:<ISO week>`: past the
+    date (or else the km); repeats once a week until it is done.
+
+  "Done" moves `next_date` and `next_km`, so the next cycle has new ids.
+- `tyre_hint`: the season-swap hint ([api.md](api.md#tyres)); `id` is
+  `tyre_hint:<winter or summer>:<local date>`. Sent when the hint appears,
+  then at most once per 14 days while it stays. When the hint goes away the
+  sent rows are dropped, so a hint that comes back is new. A run without an
+  outside temperature leaves the tyre notices alone.
+- `tyre_age`: a set (not retired) is older than `EVJ_TYRE_MAX_AGE_YEARS`;
+  `id` is `tyre_age:<set id>`, sent once.
+
+Upkeep and tyre notices are checked on every run and go out only between
+08:00 and 21:00 local time; one due at night waits for the first run after
+08:00. `dry-run` lists the ones it would send now.
 
 ### Home place
 
