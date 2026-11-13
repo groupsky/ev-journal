@@ -140,6 +140,44 @@ The car app draws battery health trends from `/health/daily` and
   read, not InfluxDB aggregates, so the rules stay in Python and the tests
   check them with made-up frames.
 
+## Heating
+
+The cost of a preheat on the plug, and "preheat on the plug or heat while
+driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
+
+- **Limits.** The car gives no heater power value, so the cabin heater's kWh
+  while driving is not known here (a separate estimate, later). What is
+  measured: the preheat on the plug (the charger meter and the battery
+  counters), and whole mornings with and without a preheat.
+- **A preheat** is a run of minutes with a car frame in `state =
+  plugged-preheat`, joined when the gap is under 5 min. **Fallback** when the
+  car app was not awake: a charger meter block above 150 W after a home
+  charge (per `ioniq_sessions`) has ended and before the next trip, with no
+  SoC rise, and not at the time of a known preheat. The fallback looks at most
+  24 h after the charge.
+- **Numbers per preheat:** wall kWh = meter total at its last minute minus
+  the total before its first; battery kWh = Δ `cum_out_kwh` − Δ `cum_in_kwh`;
+  outside °C = the car's `hvac outdoor_c` and `ambient c`, 30 min mean, at
+  most 1 h before the start; it belongs to the next journey.
+- **Cost** = wall kWh × the home price of its tariff zone (day or night, as
+  in [forecast.md](forecast.md)) + battery kWh × the pool price at the next
+  journey's first trip ([price.md](price.md)). The home price per zone is
+  Σ `cost_<zone>_eur` ÷ Σ `meter_kwh_<zone>` of the home charges in
+  `ioniq_charges` over the last 30 days.
+- **Not counted twice.** A preheat inside a home charge (in homy's data a
+  preheat could look like a charge) has its wall kWh in that charge's meter
+  kWh and cost already. Its wall € is taken out of the charge's cost before
+  the trips are priced, so it raises neither the driving price nor
+  `spent_eur`; it shows only as heating. `ev_preheat.in_charge` marks it.
+- **Preheat or not** (`/heating/compare`): commute journeys in 5 °C bands of
+  the outside temperature at the start, with and without a preheat. Means
+  only from 3 journeys up. `dry-run` prints the same table without money.
+- **Battery heater.** The car gives `heater_1` and `heater_2` in `bms/2105`
+  and no power. `dry-run` counts the 10 min buckets where a heater reading is
+  more than 2 °C above the warmest module (`temp_max` of `bms/2101`), and how
+  many fall in preheats and home charges. The answer from the real data, as
+  counts, goes in [heating.md](heating.md).
+
 ## Storage and outputs
 
 - The store (places, routes, upkeep items, tyre sets and swaps, labels, the health days cache, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
