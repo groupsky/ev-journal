@@ -72,6 +72,7 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
   - A retained MQTT summary (the last 10 journeys, the month, and cost per kWh and per 100 km for all time and the last 30 days) for a Home Assistant view in homy.
   - Notices on MQTT (not retained), for example the evening plug check; homy sends them on to a person ([outputs.md](outputs.md#notices)).
+  - The home place on MQTT (retained), so homy can tell when the car leaves home ([outputs.md](outputs.md#home-place)).
 
 ## Later
 

@@ -1,5 +1,6 @@
 """Rows for InfluxDB and the MQTT summary."""
 
+import sys
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,7 @@ from ev_journal.geo import thin
 from ev_journal.influx import line
 from ev_journal.journeys import Journey, Month, Result
 from ev_journal.overview import overview
+from ev_journal.places import Place
 
 TRACK_STEP_M = 50.0
 
@@ -212,3 +214,15 @@ def _home_charge(h: dict | None) -> dict | None:
         "meter_kwh_to_target": round(h["meter_kwh_to_target"], 2),
         "min_to_target": _r(h["min_to_target"], 0),
     }
+
+
+def home_message(places: list[Place], now: int) -> dict | None:
+    """The retained home place for homy (#50). None when there is no home place.
+    With several, the first by id, and a warning."""
+    homes = sorted((p for p in places if p.kind == "home"), key=lambda p: p.id)
+    if not homes:
+        return None
+    if len(homes) > 1:
+        print(f"ev-journal: {len(homes)} home places, using {homes[0].id}", file=sys.stderr)
+    h = homes[0]
+    return {"updated": _iso(now), "id": h.id, "lat": h.lat, "lon": h.lon, "radius_m": h.radius_m}

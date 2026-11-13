@@ -190,6 +190,20 @@ sends the same `id` twice, also after a restart. `time` is local ISO time.
 
 Later notices (upkeep reminders) use the same topic with their own `kind`.
 
+### Home place
+
+Topic `homy/ioniq/home`, **retained**, QoS 1. JSON:
+
+```json
+{"updated": "2026-01-10T10:00:00Z", "id": "p-home", "lat": 0.1, "lon": 0.1, "radius_m": 150}
+```
+
+The place of kind `home`: where the house charger meter is. homy reads it to
+tell when the car leaves home; the store stays the one source. Published on
+each run, and at once after a place is created, changed or deleted through
+the API. Not published when there is no `home` place (an old retained message
+stays). With several, the first by `id`, and a warning in the log.
+
 ## Places seed
 
 `EVJ_PLACES_FILE` points to a JSON list outside the repo. It is imported once
