@@ -29,6 +29,7 @@ from ev_journal import (
     price,
     source,
     track,
+    upkeep,
 )
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build, month_key
@@ -168,7 +169,8 @@ def run(s: Settings) -> Result:
     if s.mqtt_url:
         from ev_journal import mqtt
 
-        mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
+        now = int(time.time() * 1000)
+        mqtt.publish(s.mqtt_url, outputs.summary(r, now, ZoneInfo(s.tz), upkeep_part(s, now)))
         try:
             publish_home(s)
         except Exception as e:  # a side output: the run goes on
@@ -201,6 +203,22 @@ def publish_home(s: Settings) -> None:
             store.close()
         if msg is not None:
             mqtt.publish(s.mqtt_url, msg, mqtt.HOME_TOPIC)
+
+
+def odometer_now(s: Settings) -> tuple[int, float] | None:
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    return source.last_odometer(db)
+
+
+def upkeep_part(s: Settings, now: int) -> list[dict]:
+    """The upkeep items for the MQTT summary (#44)."""
+    odo = odometer_now(s)
+    store = places.open_store(s.data_dir)
+    try:
+        today = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz)).date()
+        return upkeep.mqtt_part(upkeep.items(store, today, odo[1] if odo else None))
+    finally:
+        store.close()
 
 
 def publish_home_soon(s: Settings) -> None:
@@ -292,6 +310,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda jid: journey_track(s, state["fixes"], jid),
         lambda: state["journey_items"],
         (lambda: publish_home_soon(s)) if s.mqtt_url else lambda: None,
+        lambda: odometer_now(s),
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

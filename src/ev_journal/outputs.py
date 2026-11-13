@@ -161,8 +161,9 @@ def journey_item(j: Journey) -> dict:
     }
 
 
-def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
-    """The retained MQTT summary: the last 10 journeys and the current month."""
+def summary(r: Result, now: int, tz: ZoneInfo, upkeep: list[dict] | None = None) -> dict:
+    """The retained MQTT summary: the last 10 journeys and the current month.
+    upkeep: the items of upkeep.mqtt_part."""
     last = [journey_item(j) for j in reversed(r.journeys[-10:])]
     key = datetime.fromtimestamp(now / 1000, tz).strftime("%Y-%m")
     m = next((m for m in r.months if m.key == key), None) or Month(start=0, key=key)
@@ -192,6 +193,7 @@ def summary(r: Result, now: int, tz: ZoneInfo) -> dict:
         "overview": {p: _rounded(v) for p, v in overview(r, now).items()},
         "home_charge": _home_charge(r.home_charge),
         "advice": r.advice,
+        "upkeep": upkeep or [],
     }
 
 

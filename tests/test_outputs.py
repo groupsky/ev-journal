@@ -50,3 +50,6 @@ def test_summary():
     assert s["journeys"][0]["id"] == r.journeys[-1].id  # newest first
     assert s["month"]["month"] == "2026-01"
     assert s["month"]["journeys"] == 10
+    assert s["upkeep"] == []
+    part = [{"name": "Test item", "status": "soon"}]
+    assert outputs.summary(r, r.journeys[-1].end, UTC, part)["upkeep"] == part

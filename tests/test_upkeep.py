@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import TOKEN, CheckedClient
 
-from ev_journal import places
+from ev_journal import places, source
 from ev_journal.api import create_app
 from ev_journal.upkeep import add_months, derive, mqtt_part, urgency
 
@@ -172,3 +172,19 @@ def test_api_paper_done_needs_due_date(upk):
     assert upk.get(f"/upkeep/{pid}/log").json()[0]["due_date"] == "3000-01-01"
     assert upk.post(f"/upkeep/{pid}/done", json={"due_date": "soon"}).status_code == 422
     assert upk.post("/upkeep/nope/done", json={}).status_code == 404
+
+
+class FakeInflux:
+    def __init__(self, rows):
+        self.rows, self.queries = rows, []
+
+    def query(self, q):
+        self.queries.append(q)
+        return self.rows
+
+
+def test_km_now_from_the_odometer():
+    db = FakeInflux([{"time": 1_900_000_000_000, "last": 50_000}])
+    assert source.last_odometer(db) == (1_900_000_000_000, 50_000.0)
+    assert "'odometer'" in db.queries[0] and "ioniq" in db.queries[0]
+    assert source.last_odometer(FakeInflux([])) is None
