@@ -60,10 +60,11 @@ def open_store(data_dir: Path) -> sqlite3.Connection:
     db = sqlite3.connect(store_path(data_dir))
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
-    from ev_journal import charges, upkeep  # their tables live in the same file
+    from ev_journal import charges, tyres, upkeep  # their tables live in the same file
 
     charges.init(db)
     upkeep.init(db)
+    tyres.init(db)
     have = {r["name"] for r in db.execute("PRAGMA table_info(places)")}
     for col, decl in PLACE_COLUMNS.items():
         if col not in have:
