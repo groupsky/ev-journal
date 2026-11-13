@@ -170,7 +170,8 @@ Each item also gets:
 
 `POST /upkeep/{id}/done` takes `{"date"?, "km"?, "due_date"?, "note"?}`.
 `date` defaults to today and `km` to `km_now`. It writes a log row and sets
-`last_date` and `last_km`. A paper needs the new `due_date` (`422`
+`last_date` and `last_km` (with no km at all, `last_km` stays as it was).
+When the odometer cannot be read, `km_now` is `null`, as with no reading. A paper needs the new `due_date` (`422`
 without it); it replaces the old one.
 
 ## Advice

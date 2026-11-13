@@ -171,6 +171,7 @@ def test_api_paper_done_needs_due_date(upk):
     assert got["due_date"] == "3000-01-01" and got["next_date"] == "3000-01-01"
     assert upk.get(f"/upkeep/{pid}/log").json()[0]["due_date"] == "3000-01-01"
     assert upk.post(f"/upkeep/{pid}/done", json={"due_date": "soon"}).status_code == 422
+    assert upk.post(f"/upkeep/{pid}/done", json={"due_date": "30000101"}).status_code == 422
     assert upk.post("/upkeep/nope/done", json={}).status_code == 404
 
 
@@ -188,3 +189,20 @@ def test_km_now_from_the_odometer():
     assert source.last_odometer(db) == (1_900_000_000_000, 50_000.0)
     assert "'odometer'" in db.queries[0] and "ioniq" in db.queries[0]
     assert source.last_odometer(FakeInflux([])) is None
+
+
+def test_api_odometer_fails_or_missing_keeps_km(upk, odo, data_dir):
+    oid = upk.post("/upkeep", json=OIL).json()["id"]
+
+    def broken():
+        raise RuntimeError("no influx")
+
+    odo["value"] = None
+    got = upk.post(f"/upkeep/{oid}/done", json={}).json()
+    assert got["last_km"] == 40_000 and got["next_km"] == 55_000 and got["km_left"] is None
+    assert upk.get(f"/upkeep/{oid}/log").json()[0]["km"] is None
+    app = create_app(places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), km_now=broken)
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    got = c.get("/upkeep").json()
+    assert got["km_now"] is None and got["items"][0]["km_left"] is None

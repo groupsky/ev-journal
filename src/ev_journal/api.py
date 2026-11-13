@@ -5,6 +5,7 @@ file outside the repo (EVJ_API_TOKEN_FILE). Without a token, every request
 is refused.
 """
 
+import datetime as dt
 import hmac
 import json
 import sqlite3
@@ -312,9 +313,9 @@ class UpkeepList(BaseModel):
 
 
 class UpkeepDoneIn(BaseModel):
-    date: str | None = Field(default=None, description="YYYY-MM-DD; default today.")
+    date: dt.date | None = Field(default=None, description="Default: today.")
     km: float | None = Field(default=None, ge=0, description="Default: the last odometer reading.")
-    due_date: str | None = Field(default=None, description="A paper: the new end day. Needed.")
+    due_date: dt.date | None = Field(default=None, description="A paper: the new end day. Needed.")
     note: str | None = None
 
 
@@ -633,8 +634,16 @@ def create_app(
     def today() -> date:
         return datetime.now(tz).date()
 
+    def odometer() -> tuple[int, float] | None:
+        """The last odometer reading; None when it cannot be read."""
+        try:
+            return km_now()
+        except Exception as e:
+            print(f"ev-journal: no odometer reading: {e!r}", file=sys.stderr)
+            return None
+
     def odo() -> float | None:
-        got = km_now()
+        got = odometer()
         return got[1] if got else None
 
     def upkeep_item(row) -> UpkeepItem:
@@ -643,7 +652,7 @@ def create_app(
     @r.get("/upkeep", response_model=UpkeepList)
     def list_upkeep(conn=Depends(db)):
         """All upkeep items with their status, the most urgent first."""
-        got = km_now()
+        got = odometer()
         km = got[1] if got else None
         return UpkeepList(
             km_now=km,
@@ -671,29 +680,27 @@ def create_app(
     def upkeep_done(item_id: str, p: UpkeepDoneIn, conn=Depends(db)):
         """Log that the item was done, and move last_date and last_km (a paper:
         due_date too). date defaults to today, km to the last odometer reading."""
-        for v in (p.date, p.due_date):
-            try:
-                v and date.fromisoformat(v)
-            except ValueError as e:
-                raise Fail(422, f"not a date: {v}") from e
-        day = p.date or today().isoformat()
+        day = (p.date or today()).isoformat()
+        due = p.due_date.isoformat() if p.due_date else None
         km = p.km if p.km is not None else odo()
 
         def cols() -> dict:
             row = upkeep.row_dict(get_row(conn, "upkeep_items", item_id))
-            if row["kind"] == "paper" and not p.due_date:
+            if row["kind"] == "paper" and not due:
                 raise Fail(422, "a paper needs due_date")
             conn.execute(
                 "INSERT INTO upkeep_log (item_id, date, km, note, due_date, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
-                (item_id, day, km, p.note, p.due_date, store.now_ms()),
+                (item_id, day, km, p.note, due, store.now_ms()),
             )
             keep = ("id", "version", "updated_at", "deleted", "seq")
             row = {k: v for k, v in row.items() if k not in keep}
             row["remind_days"] = json.dumps(row["remind_days"])
-            row["last_date"], row["last_km"] = day, km
+            row["last_date"] = day
+            if km is not None:  # without a km, keep the old one and its next_km
+                row["last_km"] = km
             if row["kind"] == "paper":
-                row["due_date"] = p.due_date
+                row["due_date"] = due
             return row
 
         save(conn, "upkeep_items", item_id, cols, None, False)

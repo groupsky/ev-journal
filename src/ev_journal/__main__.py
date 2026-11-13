@@ -170,7 +170,12 @@ def run(s: Settings) -> Result:
         from ev_journal import mqtt
 
         now = int(time.time() * 1000)
-        mqtt.publish(s.mqtt_url, outputs.summary(r, now, ZoneInfo(s.tz), upkeep_part(s, now)))
+        try:
+            up = upkeep_part(s, now)
+        except Exception as e:  # a side output: the summary still goes out
+            print(f"ev-journal: no upkeep in the summary: {e!r}", file=sys.stderr)
+            up = []
+        mqtt.publish(s.mqtt_url, outputs.summary(r, now, ZoneInfo(s.tz), up))
         try:
             publish_home(s)
         except Exception as e:  # a side output: the run goes on

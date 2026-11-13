@@ -1154,18 +1154,20 @@
           "date": {
             "anyOf": [
               {
+                "format": "date",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "YYYY-MM-DD; default today.",
+            "description": "Default: today.",
             "title": "Date"
           },
           "due_date": {
             "anyOf": [
               {
+                "format": "date",
                 "type": "string"
               },
               {
