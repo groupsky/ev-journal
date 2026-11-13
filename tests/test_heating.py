@@ -179,7 +179,7 @@ def test_stretch_to_the_meter_block():
     # The meter runs 06:00-06:24; the car app saw only 06:05-06:10.
     rows = minutes([(5, 0), (25, 4000), (10, 0)], t=T0 - 5 * MIN)
     p = Preheat(T0 + 5 * MIN, T0 + 10 * MIN, "state")
-    heating.stretch([p], rows)
+    assert heating.stretch([p], rows, []) == [p]
     assert (p.start, p.end) == (T0, T0 + 24 * MIN)
     assert abs(heating.wall_kwh(rows, p) - 25 * 4 / 60) < 0.01
 
@@ -201,3 +201,22 @@ def test_unknown_preheat_numbers_stay_unknown():
     assert row["preheat"] and row["preheat_kwh"] is None and row["eur"] is None
     g = heating.compare([row, {**row, "preheat_kwh": 2.0, "eur": 1.5}, {**row, "preheat_kwh": 4.0}])
     assert g[0]["preheat_kwh"] == 3.0 and g[0]["eur"] == 1.5
+
+
+def test_stretch_stays_out_of_charges_and_joins():
+    rows = minutes([(30, 4000)], t=T0)
+    # Two sessions on one meter block become one.
+    ps = heating.stretch(
+        [Preheat(T0, T0 + 5 * MIN, "state"), Preheat(T0 + 15 * MIN, T0 + 20 * MIN, "state")],
+        rows,
+        [],
+    )
+    assert [(p.start, p.end) for p in ps] == [(T0, T0 + 29 * MIN)]
+    # A charge ends at T0 + 5 min: the preheat starts after it.
+    p = Preheat(T0 + 10 * MIN, T0 + 12 * MIN, "state")
+    heating.stretch([p], rows, [(T0 - 60 * MIN, T0 + 5 * MIN)])
+    assert (p.start, p.end) == (T0 + 6 * MIN, T0 + 29 * MIN)
+    # A preheat inside a charge keeps its times, so it stays marked in_charge.
+    p = Preheat(T0 + 10 * MIN, T0 + 12 * MIN, "state")
+    heating.stretch([p], rows, [(T0, T0 + 20 * MIN)])
+    assert (p.start, p.end) == (T0 + 10 * MIN, T0 + 12 * MIN)

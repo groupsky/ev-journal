@@ -47,14 +47,32 @@ def from_states(frames: list[tuple[int, str]], join_ms: int = JOIN_MS) -> list[P
     return out
 
 
-def stretch(ps: list[Preheat], minutes: list[tuple[int, float | None, float | None]]) -> None:
+def stretch(
+    ps: list[Preheat],
+    minutes: list[tuple[int, float | None, float | None]],
+    charges: list[tuple[int, int]],
+) -> list[Preheat]:
     """Widen each preheat to the meter block that overlaps it: the car app can
-    wake after the heater starts and sleep before it stops. The caller bounds
-    the minutes, so a block never reaches far back into a charge."""
-    for b in blocks(minutes):
-        for p in ps:
+    wake after the heater starts and sleep before it stops. Never into a
+    charge (start, end), and not at all for a preheat inside a charge. Then
+    join the preheats that now overlap. Returns the new list."""
+    bs = blocks(minutes)
+    for p in ps:
+        if any(s <= p.start and p.end <= e for s, e in charges):
+            continue
+        lo = max((e + MIN for s, e in charges if e <= p.start), default=None)
+        hi = min((s - MIN for s, e in charges if s >= p.end), default=None)
+        for b in bs:
             if b.start <= p.end and p.start <= b.end:
-                p.start, p.end = min(p.start, b.start), max(p.end, b.end)
+                p.start = min(p.start, b.start) if lo is None else max(min(p.start, b.start), lo)
+                p.end = max(p.end, b.end) if hi is None else min(max(p.end, b.end), hi)
+    out: list[Preheat] = []
+    for p in sorted(ps, key=lambda p: p.start):
+        if out and p.start <= out[-1].end + MIN:
+            out[-1].end = max(out[-1].end, p.end)
+        else:
+            out.append(p)
+    return out
 
 
 def from_meter(

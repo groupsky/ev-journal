@@ -152,7 +152,9 @@ driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
 - **A preheat** is a run of minutes with a car frame in `state =
   plugged-preheat`, joined when the gap is under 5 min, then widened to the
   charger meter block that overlaps it (at most 10 min earlier and 1 h
-  later): the car app can sleep while the heater runs. **Fallback** when the
+  later, never into a charge; one inside a charge keeps its times), and
+  preheats that then overlap are joined: the car app can sleep while the
+  heater runs. **Fallback** when the
   car app was not awake: a charger meter block above 150 W after a home
   charge (per `ioniq_sessions`) has ended and before the next trip, with no
   SoC rise, and not at the time of a known preheat. The fallback looks at most

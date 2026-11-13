@@ -88,9 +88,12 @@ def preheats(s: Settings, db: Influx, r: Result, home: set[int], start: int, end
     charge, the home prices by zone and the outside temperature (#47)."""
     tz = ZoneInfo(s.tz)
     ps = heating.from_states(source.preheat_minutes(db, start, end))
-    for p in ps:
+    charge_spans = [(c.start, c.end) for c in r.charges]
+    for i, p in enumerate(ps):
         # At most 10 min earlier and 1 h later than the car app saw it.
-        heating.stretch([p], source.meter_minutes(db, p.start - 600_000, p.end + 3_600_000))
+        mins = source.meter_minutes(db, p.start - 600_000, p.end + 3_600_000)
+        ps[i : i + 1] = heating.stretch([p], mins, charge_spans)
+    ps = heating.stretch(ps, [], [])  # join the ones that now overlap
     home_charges = [
         c for c in r.charges if c.start in home or (c.place is not None and c.place.kind == "home")
     ]
