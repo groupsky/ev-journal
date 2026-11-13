@@ -93,7 +93,7 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
   that week. A set older than `EVJ_TYRE_MAX_AGE_YEARS` gets a warning.
 - The **season hint** uses the car's outside temperature (`ioniq` groups
   `ambient` field `c` and `hvac` field `outdoor_c`), one mean per local day
-  over the last 30 days. The car reads only while it runs, so a day with no
+  over the last 30 days (3 times `EVJ_TYRE_SWAP_DAYS` when that is longer). The car reads only while it runs, so a day with no
   reading is left out. The mean of the last 7 such days below 7 °C says
   "winter"; above says "summer". The same mean is used both ways: it is
   simple and one warm or cold day does not flip it.
