@@ -52,8 +52,10 @@ def _upkeep(d: dict, week: str) -> list[tuple[str, str]]:
     return out
 
 
-def _last_hint(db: sqlite3.Connection) -> int | None:
-    row = db.execute("SELECT MAX(time) FROM notices WHERE id LIKE 'tyre_hint:%'").fetchone()
+def _last_hint(db: sqlite3.Connection, season: str) -> int | None:
+    row = db.execute(
+        "SELECT MAX(time) FROM notices WHERE id LIKE ?", (f"tyre_hint:{season}:%",)
+    ).fetchone()
     return row[0]
 
 
@@ -73,11 +75,11 @@ def pending(
                 found.append(
                     (
                         f"tyre_age:{s['id']}",
-                        f"Гуми {s['name']}: стари са, над {s['age_years']} години.",
+                        f"Гуми {s['name']}: стари са ({s['age_years']} години).",
                     )
                 )
         h = tyres["hint"]
-        last = _last_hint(db)
+        last = _last_hint(db, h) if h else None
         if h and (last is None or now - last >= HINT_EVERY.total_seconds() * 1000):
             found.append(
                 (f"tyre_hint:{h}:{local.date().isoformat()}", f"Гуми: време е за {SEASON[h]}.")

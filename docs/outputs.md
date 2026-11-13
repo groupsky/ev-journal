@@ -216,8 +216,9 @@ sends the same `id` twice, also after a restart. `time` is local ISO time.
 - `tyre_hint`: the season-swap hint ([api.md](api.md#tyres)); `id` is
   `tyre_hint:<winter or summer>:<local date>`. Sent when the hint appears,
   then at most once per 14 days while it stays. When the hint goes away the
-  sent rows are dropped, so a hint that comes back is new. A run without an
-  outside temperature leaves the tyre notices alone.
+  sent rows are dropped, so a hint that comes back is new. A run with fewer than
+  `EVJ_TYRE_SWAP_DAYS` days of outside temperature sends no tyre notices
+  and keeps the sent rows, so a gap in the readings is not a gone hint.
 - `tyre_age`: a set (not retired) is older than `EVJ_TYRE_MAX_AGE_YEARS`;
   `id` is `tyre_age:<set id>`, sent once.
 

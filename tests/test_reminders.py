@@ -162,6 +162,7 @@ def test_tyre_age_one_notice(tmp_path):
     db = places.open_store(tmp_path)
     [n] = send(db, [], "2030-06-01", tyres=tyres("2030-06-01", 20.0, sets))
     assert n["id"] == "tyre_age:s" and n["kind"] == "tyre_age"
+    assert n["text"] == f"Гуми Test s: стари са ({n_age(sets)} години)."
     assert send(db, [], "2030-06-02", tyres=tyres("2030-06-02", 20.0, sets)) == []
 
 
@@ -208,3 +209,26 @@ def test_send_reminders_publishes_on_the_notice_topic(monkeypatch, tmp_path):
     [(topic, retain, m)] = sent
     assert topic == "homy/ioniq/notice" and retain is False
     assert m["id"] == "upkeep:p1:2030-07-15:30d"
+
+
+def n_age(sets):
+    return tyres("2030-06-01", 20.0, sets)["sets"][0]["age_years"]
+
+
+def test_too_few_temperature_days_skip_the_tyre_notices(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from ev_journal import __main__ as cli
+
+    monkeypatch.setattr(cli, "odometer_now", lambda s: None)
+    monkeypatch.setattr(cli, "outside_temps", lambda s: [3.0] * 6)
+    s = SimpleNamespace(
+        tz="Europe/Sofia", tyre_max_age_years=6.0, tyre_swap_c=7.0, tyre_swap_days=7
+    )
+    db = places.open_store(tmp_path)
+    now, _ = at("2030-11-01")
+    assert cli.reminder_inputs(s, db, now)[1] is None
+    # tyres=None keeps the sent hint rows: a gap is not a gone hint
+    send(db, [], "2030-11-01", tyres=tyres("2030-11-01", 3.0))
+    send(db, [], "2030-11-03", tyres=None)
+    assert send(db, [], "2030-11-05", tyres=tyres("2030-11-05", 3.0)) == []

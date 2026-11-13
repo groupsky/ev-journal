@@ -268,8 +268,9 @@ def tyres_part(s: Settings, now: int) -> dict:
 
 
 def reminder_inputs(s: Settings, store, now: int) -> tuple[list[dict], dict | None, datetime]:
-    """The upkeep items, the tyre overview (None without a temperature, so a
-    missing reading does not look like a gone hint) and now in local time."""
+    """The upkeep items, the tyre overview and now in local time. The tyre
+    overview is None with fewer than EVJ_TYRE_SWAP_DAYS days of outside
+    temperature, so a gap in the readings does not look like a gone hint."""
     odo = odometer_now(s)
     km = odo[1] if odo else None
     local = datetime.fromtimestamp(now / 1000, ZoneInfo(s.tz))
@@ -278,6 +279,8 @@ def reminder_inputs(s: Settings, store, now: int) -> tuple[list[dict], dict | No
         temps = outside_temps(s)
     except Exception as e:
         print(f"ev-journal: no tyre reminders: {e!r}", file=sys.stderr)
+        return items, None, local
+    if len(temps) < s.tyre_swap_days:
         return items, None, local
     sets, swaps = tyres.load(store)
     return items, tyres.overview(sets, swaps, local.date(), km, temps, tyre_rules(s)), local
