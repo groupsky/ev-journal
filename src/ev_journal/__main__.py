@@ -169,7 +169,10 @@ def run(s: Settings) -> Result:
         from ev_journal import mqtt
 
         mqtt.publish(s.mqtt_url, outputs.summary(r, int(time.time() * 1000), ZoneInfo(s.tz)))
-        publish_home(s)
+        try:
+            publish_home(s)
+        except Exception as e:  # a side output: the run goes on
+            print(f"ev-journal: home place publish failed: {e!r}", file=sys.stderr)
     reader = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     deleted = cleanup.cleanup(reader, db, r)
     try:
@@ -183,17 +186,34 @@ def run(s: Settings) -> Result:
     return r
 
 
+_home_lock = threading.Lock()  # the last read of the store is published last
+
+
 def publish_home(s: Settings) -> None:
     """The home place, retained, for homy's car checks (#50)."""
     from ev_journal import mqtt
 
-    store = places.open_store(s.data_dir)
-    try:
-        msg = outputs.home_message(places.all_places(store), int(time.time() * 1000))
-    finally:
-        store.close()
-    if msg is not None:
-        mqtt.publish(s.mqtt_url, msg, mqtt.HOME_TOPIC)
+    with _home_lock:
+        store = places.open_store(s.data_dir)
+        try:
+            msg = outputs.home_message(places.all_places(store), int(time.time() * 1000))
+        finally:
+            store.close()
+        if msg is not None:
+            mqtt.publish(s.mqtt_url, msg, mqtt.HOME_TOPIC)
+
+
+def publish_home_soon(s: Settings) -> None:
+    """After a place change in the API: publish in the background, so a slow
+    broker does not hold the API answer."""
+
+    def go():
+        try:
+            publish_home(s)
+        except Exception as e:
+            print(f"ev-journal: home place publish failed: {e!r}", file=sys.stderr)
+
+    threading.Thread(target=go, daemon=True).start()
 
 
 def plug_decision(s: Settings, r: Result, now: int) -> tuple[str | None, str]:
@@ -271,7 +291,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["advice_ctx"],
         lambda jid: journey_track(s, state["fixes"], jid),
         lambda: state["journey_items"],
-        (lambda: publish_home(s)) if s.mqtt_url else lambda: None,
+        (lambda: publish_home_soon(s)) if s.mqtt_url else lambda: None,
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

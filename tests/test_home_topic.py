@@ -83,3 +83,22 @@ def test_a_failed_publish_does_not_fail_the_write(data_dir, capsys):
     )
     assert client.post("/places", json=HOME_IN).status_code == 201
     assert "broker down" in capsys.readouterr().err
+
+
+def test_soon_publishes_in_the_background_and_logs_a_failure(monkeypatch, data_dir, capsys):
+    import threading
+
+    s, _ = fake_mqtt(monkeypatch, data_dir)
+    done = threading.Event()
+
+    def broken(_s):
+        done.set()
+        raise OSError("broker down")
+
+    monkeypatch.setattr(cli, "publish_home", broken)
+    cli.publish_home_soon(s)
+    assert done.wait(5)
+    for t in threading.enumerate():
+        if t is not threading.current_thread() and t.daemon:
+            t.join(1)
+    assert "broker down" in capsys.readouterr().err
