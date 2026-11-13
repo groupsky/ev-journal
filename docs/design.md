@@ -134,7 +134,7 @@ The car app draws battery health trends from `/health/daily` and
   SoH 50–110 %, isolation 1–10 000 kΩ (0 means "not measured"), 12 V
   8–16 V, fan feedback 0–255. The numbers are in `health.py`.
 - **Load and cache:** past days do not change, so each day before yesterday
-  is read once, in one InfluxDB read per month, and kept in the SQLite
+  is read once, in one call per month (InfluxDB is read day by day inside it, and a day that hits the row limit is read in halves), and kept in the SQLite
   `health_days` table (a day without car data too, as an empty row).
   Yesterday and today are read on each request and not kept. Raw frames are
   read, not InfluxDB aggregates, so the rules stay in Python and the tests
