@@ -517,6 +517,82 @@
         "title": "HealthDay",
         "type": "object"
       },
+      "HeatingGroup": {
+        "properties": {
+          "band_c": {
+            "description": "Outside temperature band at the journey start, [low, high) \u00b0C.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Band C",
+            "type": "array"
+          },
+          "battery_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean journey battery kWh. Null under 3 journeys.",
+            "title": "Battery Kwh"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean \u20ac of preheat + journey. Null under 3 journeys or no price.",
+            "title": "Eur"
+          },
+          "kwh_per_100km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Journey battery kWh per 100 km. Null under 3 journeys.",
+            "title": "Kwh Per 100Km"
+          },
+          "preheat": {
+            "description": "Journeys with a preheat on the plug before them.",
+            "title": "Preheat",
+            "type": "boolean"
+          },
+          "preheat_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean preheat wall kWh. Null under 3 journeys.",
+            "title": "Preheat Kwh"
+          }
+        },
+        "required": [
+          "band_c",
+          "preheat",
+          "count"
+        ],
+        "title": "HeatingGroup",
+        "type": "object"
+      },
       "JourneyDay": {
         "description": "The journeys that start on one local day, summed.",
         "properties": {
@@ -2525,6 +2601,63 @@
           }
         },
         "summary": "Get Health Fan"
+      }
+    },
+    "/heating/compare": {
+      "get": {
+        "description": "Commute journeys of the last `days` days, with and without a\npreheat on the plug, by 5 \u00b0C band of the outside temperature at the\nstart. A group under 3 journeys has only the count.",
+        "operationId": "get_heating_compare_heating_compare_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "maximum": 3660,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HeatingGroup"
+                  },
+                  "title": "Response Get Heating Compare Heating Compare Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Heating Compare"
       }
     },
     "/journeys": {

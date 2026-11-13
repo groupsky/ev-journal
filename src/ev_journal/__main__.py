@@ -8,6 +8,7 @@ dry-run: read and recompute, print counts per month, what the plug check
   would decide now and the reminders it would send, write nothing.
 """
 
+import bisect
 import shutil
 import statistics
 import sys
@@ -23,6 +24,7 @@ from ev_journal import (
     cleanup,
     forecast,
     health,
+    heating,
     homecharge,
     outputs,
     places,
@@ -63,10 +65,65 @@ def compute(s: Settings) -> Result:
         labels=labels,
     )
     home = source.home_costs(db)
-    price.apply(r, {**away_costs, **home}, set(home), ZoneInfo(s.tz))
+    costs = {**away_costs, **home}
+    ps, prices, outdoor = preheats(s, db, r, set(home), start, end)
+    heating.charge_costs(costs, ps, prices)
+    price.apply(r, costs, set(home), ZoneInfo(s.tz))
+    first_trip = {j.id: j.trips[0] for j in r.journeys}
+    for p in ps:
+        t = first_trip.get(p.journey)
+        p.cost_eur = heating.cost(p, prices, t.price_eur_per_kwh if t else None)
+    heating.totals(r, ps, ZoneInfo(s.tz))
+    r.heating_rows = heating.journey_rows(r, outdoor)
     home_charge_model(s, db, r, set(home), end)
     advice(s, db, r)
     return r
+
+
+PREHEAT_SEARCH_MS = 24 * 3_600_000  # the meter fallback looks this far after a home charge
+
+
+def preheats(s: Settings, db: Influx, r: Result, home: set[int], start: int, end: int):
+    """The preheats on the plug with their kWh, zone, journey and home
+    charge, the home prices by zone and the outside temperature (#47)."""
+    tz = ZoneInfo(s.tz)
+    ps = heating.from_states(source.preheat_minutes(db, start, end))
+    charge_spans = [(c.start, c.end) for c in r.charges]
+    for i, p in enumerate(ps):
+        # At most 10 min earlier and 1 h later than the car app saw it.
+        mins = source.meter_minutes(db, p.start - 600_000, p.end + 3_600_000)
+        ps[i : i + 1] = heating.stretch([p], mins, charge_spans)
+    ps = heating.stretch(ps, [], [])  # join the ones that now overlap
+    home_charges = [
+        c for c in r.charges if c.start in home or (c.place is not None and c.place.kind == "home")
+    ]
+    trip_starts = [t.start for t in r.trips]
+    charge_starts = [c.start for c in r.charges]
+    for c in home_charges:
+        # Up to the next trip or charge, so a later charge is never a preheat.
+        nxt = [t for t in trip_starts + charge_starts if t > c.end]
+        w0, w1 = c.end, min([*nxt, c.end + PREHEAT_SEARCH_MS])
+        if w1 - w0 < 60_000:
+            continue
+        mins = source.meter_minutes(db, w0 - 60_000, w1)
+        ps += heating.from_meter(
+            mins, [c.end], trip_starts, source.soc_minutes(db, w0 - 5 * 60_000, w1), ps
+        )
+    outdoor = source.outdoor(db, start, end)
+    ots = [t for t, _c in outdoor]
+    for p in ps:
+        mins = source.meter_minutes(db, p.start - 2 * 60_000, p.end + 60_000)
+        p.wall_kwh = heating.wall_kwh(mins, p)
+        p.battery_kwh = heating.battery_kwh(source.counters(db, p.start - 10 * 60_000, p.end), p)
+        i = bisect.bisect_right(ots, p.start)
+        p.outdoor_c = outdoor[i - 1][1] if i and p.start - ots[i - 1] <= 3_600_000 else None
+        p.zone = heating.zone(p.start, tz)
+    heating.link(ps, [j.start for j in r.journeys])
+    heating.inside_charge(ps, [(c.start, c.end) for c in home_charges])
+    prices = heating.home_prices(
+        source.home_charge_rows(db, end - heating.PRICE_DAYS * 86_400_000), end
+    )
+    return sorted(ps, key=lambda p: p.start), prices, outdoor
 
 
 def advice(s: Settings, db: Influx, r: Result) -> None:
@@ -408,6 +465,7 @@ def serve_api(s: Settings, state: dict) -> None:
         tyre_rules(s),
         health_series.daily,
         health_series.fan,
+        lambda: state["heating_rows"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -423,6 +481,59 @@ def serve_api(s: Settings, state: dict) -> None:
 
 def by_key(t: int, r: Result) -> str:
     return next(m.key for m in reversed(r.months) if m.start <= t)
+
+
+def print_heating(s: Settings, r: Result) -> None:
+    """Preheats, the compare table and the battery heater check (#47).
+    Money stays out: kWh and counts only."""
+    ps = r.preheats
+
+    def n(cond) -> int:
+        return sum(1 for p in ps if cond(p))
+
+    def mean(vals: list) -> str:
+        return f"{statistics.fmean(vals):.2f} (n = {len(vals)})" if vals else "- (n = 0)"
+
+    print(
+        f"preheats: {len(ps)}, from state {n(lambda p: p.source == 'state')},"
+        f" from meter {n(lambda p: p.source == 'meter')},"
+        f" inside a home charge {n(lambda p: p.in_charge is not None)},"
+        f" with a journey {n(lambda p: p.journey is not None)},"
+        f" with a cost {n(lambda p: p.cost_eur is not None)}"
+    )
+    print(
+        f"  mean wall kWh {mean([p.wall_kwh for p in ps if p.wall_kwh is not None])},"
+        f" mean battery kWh {mean([p.battery_kwh for p in ps if p.battery_kwh is not None])}"
+    )
+    since = int(time.time() * 1000) - 90 * source.DAY
+    print("preheat vs no preheat, commute journeys, last 90 days:")
+    print("  band °C   preheat  n  preheat kWh  battery kWh  kWh/100km")
+    for g in heating.compare([j for j in r.heating_rows if j["start"] >= since]):
+        vals = [g.get(k) for k in ("preheat_kwh", "battery_kwh", "kwh_per_100km")]
+        txt = "  ".join("-" if v is None else f"{v:10.2f}" for v in vals)
+        lo, hi = g["band_c"]
+        print(f"  {lo:+3d}..{hi:+3d}  {g['preheat']!s:5s} {g['count']:4d}  {txt}")
+    if not r.trips:
+        return
+    db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+    hs, ms = source.heater(db, r.trips[0].start - source.DAY, int(time.time() * 1000))
+    on = heating.heater_on(hs, ms)
+    home = [
+        (c.start, c.end)
+        for c in r.charges
+        if c.home_cost or (c.place is not None and c.place.kind == "home")
+    ]
+    step = source.HEATER_BUCKET_MS
+    pre_on = heating.on_minutes(on, [(p.start, p.end) for p in ps], step)
+    ch_on = heating.on_minutes(on, home, step)
+    print(
+        f"battery heater: {len(on)} of {len(hs)} buckets ({source.HEATER_BUCKET}) above the"
+        f" warmest module by {heating.HEATER_MARGIN_C} °C"
+    )
+    print(
+        f"  in {sum(m > 0 for m in pre_on)}/{len(ps)} preheats ({sum(pre_on):.0f} min),"
+        f" in {sum(m > 0 for m in ch_on)}/{len(home)} home charges ({sum(ch_on):.0f} min)"
+    )
 
 
 def dry_run(s: Settings) -> None:
@@ -519,6 +630,7 @@ def dry_run(s: Settings) -> None:
                 if name in by
             )
         )
+    print_heating(s, r)
     if r.advice:
         print(
             f"advice: {r.advice['day_type']}, target {r.advice['target']} %,"
@@ -585,6 +697,7 @@ def main() -> None:
             "advice_ctx": None,
             "fixes": {},
             "journey_items": [],
+            "heating_rows": [],
         }
         if s.api_token:
             serve_api(s, state)
@@ -612,6 +725,7 @@ def main() -> None:
                 state["advice_ctx"] = r.advice_ctx
                 state["fixes"] = journey_fixes(r)
                 state["journey_items"] = [outputs.journey_item(j) for j in r.journeys]
+                state["heating_rows"] = r.heating_rows
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
     else:

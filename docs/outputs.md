@@ -63,6 +63,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `label_by_hand` | `true` when the label was set through the API |
 | `not_me` | `true` when marked "not me" through the API |
 | `start_place`, `end_place` | place ids, when known |
+| `preheat_kwh`, `preheat_eur` | wall kWh and € of the preheats on the plug before it ([design.md](design.md#heating)) |
 
 ### `ev_outings` — one row per outing, at its start
 
@@ -83,6 +84,7 @@ duplicates. Times are epoch milliseconds. All numbers are floats.
 | `gap_pct` | (`km` − `odo_km`) / `odo_km` × 100 |
 | `kwh_per_pct`, `meter_ratio`, `overhead_kwh` | the battery model of the month's home charges ([home-charge.md](home-charge.md#drift)) |
 | `drift_flag` | why a value of the model moved against its 3-month median; empty when none did |
+| `preheat_kwh`, `preheat_eur` | wall kWh and € of the preheats that start in the month ([design.md](design.md#heating)) |
 
 A field that is empty this run (`null`) is not written, so an old value stays.
 `drift_flag` is always written, so an old flag is cleared.
@@ -92,6 +94,22 @@ A field that is empty this run (`null`) is not written, so an old value stays.
 The forecast of each of the last 91 full days, made only from the days
 before it, next to the real need ([forecast.md](forecast.md)). Fields
 `day_type`, `normal_kwh`, `bad_kwh`, `real_kwh`.
+
+### `ev_preheat` — one row per preheat on the plug, at its start
+
+Tag `source`: `state` (the car app said `plugged-preheat`) or `meter` (the
+charger meter fallback). Rules: [design.md](design.md#heating).
+
+| field | meaning |
+|---|---|
+| `end_ts` | the start of its last minute with power or state, ms |
+| `wall_kwh` | charger meter kWh |
+| `battery_kwh` | what the pack gave: Δ `cum_out_kwh` − Δ `cum_in_kwh` |
+| `outdoor_c` | the car's outside temperature at the start (30 min mean, at most 1 h old) |
+| `zone` | tariff zone at the start: `day` or `night` |
+| `journey` | the id of the journey it belongs to (the next one, when it starts within 1 h) |
+| `in_charge` | the start of the home charge it lies inside, if any |
+| `cost_eur` | wall kWh × home price of the zone + battery kWh × pool price |
 
 ### `ev_track` — track points for Grafana's Geomap
 
@@ -104,6 +122,7 @@ After writing, a run deletes the rows that exist but were not produced this
 time. Example: two journeys merge, so the second one's row in `ev_journeys`,
 its `ev_trips` row if the trip changed, and its `ev_track` series must go.
 
+- `ev_preheat` is checked the same way.
 - The read user lists what exists: `SELECT` of one field per measurement,
   and `SHOW TAG VALUES FROM ev_track WITH KEY = "journey"`.
 - The write user runs `DELETE FROM <m> WHERE time = <t>ms` and
@@ -137,7 +156,8 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
             "kwh_away": 40.0, "kwh_unknown": 0.0, "journeys": 10, "outings": 4, "commute_km": 99.5,
             "spent_eur": 0.0, "driving_cost_eur": 0.0, "eur_per_100km": null,
             "kwh_per_100km": 5.8, "eur_per_kwh": null, "eur_per_kwh_home": null,
-            "eur_per_kwh_away": null, "drift_flag": ""},
+            "eur_per_kwh_away": null, "drift_flag": "", "preheat_kwh": 2.1,
+            "preheat_eur": 0.4},
   "overview": {
     "all": {"eur_per_kwh": 0.2, "eur_per_kwh_home": 0.2, "eur_per_kwh_away": null,
             "eur_per_100km": 4.0, "kwh_per_100km": 20.0, "charges_no_cost": 0, "trips_no_price": 2},
@@ -146,6 +166,8 @@ Topic `homy/ioniq/journeys`, retained, QoS 1. JSON:
   "home_charge": {"running": true, "since": "…Z", "soc_plugin": 30.0, "soc_now": 52.4,
                   "meter_kwh": 8.6, "target": 80.0, "meter_kwh_to_target": 9.4,
                   "min_to_target": 462},
+  "preheat": {"start": "…Z", "end": "…Z", "source": "state", "wall_kwh": 2.1,
+              "battery_kwh": 0.1, "outdoor_c": -3.5, "cost_eur": 0.4},
   "advice": {"day": "2026-01-11", "day_type": "weekend", "normal_kwh": 6.6, "bad_kwh": 14.2,
              "soc_now": 40.0, "target": 60, "level": "low", "start": "…", "end": "…",
              "departure": null, "capped": false, "preheat_off": false, "message": "Утре: …",
@@ -174,6 +196,8 @@ calendar rhythms the forecast uses and what each adds for that day, in kWh
 home ([home-charge.md](home-charge.md)), or `null`. `running` is `false`
 when the meter has shown no charging for 2 min; `min_to_target` is then
 `null`.
+
+`preheat` is the last preheat on the plug, as in `ev_preheat`, or `null`.
 
 `upkeep` holds the car's upkeep items ([api.md](api.md#upkeep)): every item
 that is `soon` or `overdue`, then the next 3 that are `ok`, the most urgent

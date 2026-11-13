@@ -56,3 +56,37 @@ def test_summary():
     assert s["tyres"] == {"fitted": None, "hint": None, "age_warning": []}
     ty = {"fitted": {"name": "Test set"}, "hint": "winter", "age_warning": []}
     assert outputs.summary(r, r.journeys[-1].end, UTC, None, ty)["tyres"] == ty
+
+
+def test_preheat_outputs():
+    from ev_journal.heating import Preheat
+
+    r = result()
+    j = r.journeys[-1]
+    j.preheat_kwh, j.preheat_eur = 2.0, 0.2
+    r.months[-1].preheat_kwh, r.months[-1].preheat_eur = 2.0, 0.2
+    r.preheats = [
+        Preheat(
+            j.start - 1_800_000,
+            j.start - 600_000,
+            "state",
+            2.0,
+            0.1,
+            -3.0,
+            "night",
+            j.id,
+            None,
+            0.2,
+        )
+    ]
+    lines = outputs.influx_lines(r)
+    pre = [ln for ln in lines if ln.startswith("ev_preheat,")]
+    assert len(pre) == 1 and "source=state" in pre[0] and "wall_kwh=2.0" in pre[0]
+    assert pre[0].endswith(str(j.start - 1_800_000))
+    assert any(ln.startswith("ev_journeys ") and "preheat_eur=0.2" in ln for ln in lines)
+    assert any(ln.startswith("ev_month ") and "preheat_kwh=2.0" in ln for ln in lines)
+    s = outputs.summary(r, j.end, UTC)
+    assert s["preheat"]["wall_kwh"] == 2.0 and s["preheat"]["cost_eur"] == 0.2
+    assert s["month"]["preheat_eur"] == 0.2
+    r.preheats = []
+    assert outputs.summary(r, j.end, UTC)["preheat"] is None

@@ -62,6 +62,8 @@ def influx_lines(r: Result) -> list[str]:
                     "label": j.label,
                     "label_by_hand": j.label_by_hand,
                     "not_me": j.not_me,
+                    "preheat_kwh": j.preheat_kwh,
+                    "preheat_eur": j.preheat_eur,
                     "start_place": _pid(j.start_place),
                     "end_place": _pid(j.end_place),
                 },
@@ -123,11 +125,44 @@ def influx_lines(r: Result) -> list[str]:
                     "meter_ratio": m.meter_ratio,
                     "overhead_kwh": m.overhead_kwh,
                     "drift_flag": m.drift_flag,
+                    "preheat_kwh": m.preheat_kwh,
+                    "preheat_eur": m.preheat_eur,
                 },
                 m.start,
             )
         )
+    for p in r.preheats:
+        out.append(line("ev_preheat", {"source": p.source}, _preheat_fields(p), p.start))
     return out
+
+
+def _preheat_fields(p) -> dict:
+    return {
+        "end_ts": p.end,
+        "wall_kwh": p.wall_kwh,
+        "battery_kwh": p.battery_kwh,
+        "outdoor_c": p.outdoor_c,
+        "zone": p.zone,
+        "journey": p.journey,
+        "in_charge": p.in_charge,
+        "cost_eur": p.cost_eur,
+    }
+
+
+def _preheat(r: Result) -> dict | None:
+    """The last preheat for the MQTT summary (#47)."""
+    if not r.preheats:
+        return None
+    p = r.preheats[-1]
+    return {
+        "start": _iso(p.start),
+        "end": _iso(p.end),
+        "source": p.source,
+        "wall_kwh": _r(p.wall_kwh, 2),
+        "battery_kwh": _r(p.battery_kwh, 2),
+        "outdoor_c": _r(p.outdoor_c, 1),
+        "cost_eur": _r(p.cost_eur, 2),
+    }
 
 
 def _r(v: float | None, n: int) -> float | None:
@@ -187,6 +222,8 @@ def summary(
         "eur_per_kwh_home": _r(m.eur_per_kwh("home"), 3),
         "eur_per_kwh_away": _r(m.eur_per_kwh("away"), 3),
         "drift_flag": m.drift_flag,
+        "preheat_kwh": round(m.preheat_kwh, 2),
+        "preheat_eur": round(m.preheat_eur, 2),
     }
     return {
         "updated": _iso(now),
@@ -194,6 +231,7 @@ def summary(
         "month": month,
         "overview": {p: _rounded(v) for p, v in overview(r, now).items()},
         "home_charge": _home_charge(r.home_charge),
+        "preheat": _preheat(r),
         "advice": r.advice,
         "upkeep": upkeep or [],
         "tyres": tyres or {"fitted": None, "hint": None, "age_warning": []},

@@ -143,6 +143,19 @@ over the months is the sign to look for.
 The first request of a long range reads the history from InfluxDB once and
 can take a while.
 
+## Heating
+
+`GET /heating/compare?days=90` compares the commute journeys of the last
+`days` days (1–3660) with and without a preheat on the plug before them
+([#47](https://github.com/groupsky/ev-journal/issues/47),
+[design.md](design.md#heating)). One row per 5 °C band of the outside
+temperature at the journey start and per group, coldest band first:
+`{"band_c": [low, high], "preheat", "count", "preheat_kwh", "battery_kwh",
+"eur", "kwh_per_100km"}`. The means are of the preheat wall kWh, the journey
+battery kWh and the € of preheat + journey. A group of fewer than 3
+journeys has only `count`; the means are `null`. A journey with no outside
+temperature reading in the hour before it is left out.
+
 ## Command log
 
 `POST /commands` with `client_id`, `time`, `text`, `action` and an optional

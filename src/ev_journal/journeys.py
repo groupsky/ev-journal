@@ -81,6 +81,8 @@ class Journey:
     label: str = "other"
     label_by_hand: bool = False
     not_me: bool = False  # the forecast does not learn from it
+    preheat_kwh: float = 0.0  # wall kWh of the preheats before it (heating.totals)
+    preheat_eur: float = 0.0
 
     @property
     def id(self) -> int:
@@ -188,6 +190,9 @@ class Month:
     meter_ratio: float | None = None
     overhead_kwh: float | None = None
     drift_flag: str = ""
+    # filled by heating.totals()
+    preheat_kwh: float = 0.0
+    preheat_eur: float = 0.0
 
     @property
     def eur_per_100km(self) -> float | None:
@@ -228,6 +233,8 @@ class Result:
     forecast_effects: dict = field(default_factory=dict)  # forecast.plan: keys, rows, table
     advice: dict | None = None  # tomorrow's forecast and charging advice
     advice_ctx: dict | None = None  # forecast.plan: what forecast.on_request needs
+    preheats: list = field(default_factory=list)  # heating.Preheat, oldest first
+    heating_rows: list = field(default_factory=list)  # heating.journey_rows
 
 
 class Track:

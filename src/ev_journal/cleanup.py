@@ -15,6 +15,7 @@ KEY_FIELD = {
     "ev_journeys": "end_ts",
     "ev_outings": "end_ts",
     "ev_month": "km",
+    "ev_preheat": "end_ts",
 }
 
 
@@ -24,6 +25,7 @@ def produced(r: Result) -> dict[str, set[int]]:
         "ev_journeys": {j.start for j in r.journeys},
         "ev_outings": {o.start for o in r.outings},
         "ev_month": {m.start for m in r.months},
+        "ev_preheat": {p.start for p in r.preheats},
     }
 
 
