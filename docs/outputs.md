@@ -102,12 +102,12 @@ charger meter fallback). Rules: [design.md](design.md#heating).
 
 | field | meaning |
 |---|---|
-| `end_ts` | the start of its last minute, ms |
+| `end_ts` | the start of its last minute with power or state, ms |
 | `wall_kwh` | charger meter kWh |
 | `battery_kwh` | what the pack gave: Δ `cum_out_kwh` − Δ `cum_in_kwh` |
 | `outdoor_c` | the car's outside temperature at the start (30 min mean, at most 1 h old) |
 | `zone` | tariff zone at the start: `day` or `night` |
-| `journey` | the id of the journey it belongs to (the next one) |
+| `journey` | the id of the journey it belongs to (the next one, when it starts within 1 h) |
 | `in_charge` | the start of the home charge it lies inside, if any |
 | `cost_eur` | wall kWh × home price of the zone + battery kWh × pool price |
 

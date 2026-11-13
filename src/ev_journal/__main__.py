@@ -88,13 +88,18 @@ def preheats(s: Settings, db: Influx, r: Result, home: set[int], start: int, end
     charge, the home prices by zone and the outside temperature (#47)."""
     tz = ZoneInfo(s.tz)
     ps = heating.from_states(source.preheat_minutes(db, start, end))
+    for p in ps:
+        # At most 10 min earlier and 1 h later than the car app saw it.
+        heating.stretch([p], source.meter_minutes(db, p.start - 600_000, p.end + 3_600_000))
     home_charges = [
         c for c in r.charges if c.start in home or (c.place is not None and c.place.kind == "home")
     ]
     trip_starts = [t.start for t in r.trips]
+    charge_starts = [c.start for c in r.charges]
     for c in home_charges:
-        nxt = next((t for t in trip_starts if t > c.end), c.end + PREHEAT_SEARCH_MS)
-        w0, w1 = c.end, min(nxt, c.end + PREHEAT_SEARCH_MS)
+        # Up to the next trip or charge, so a later charge is never a preheat.
+        nxt = [t for t in trip_starts + charge_starts if t > c.end]
+        w0, w1 = c.end, min([*nxt, c.end + PREHEAT_SEARCH_MS])
         if w1 - w0 < 60_000:
             continue
         mins = source.meter_minutes(db, w0 - 60_000, w1)

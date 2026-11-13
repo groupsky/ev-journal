@@ -16,6 +16,7 @@ JOIN_MS = 5 * MIN  # preheat frames with a gap under this are one session
 PRICE_DAYS = 30  # the home price is learned from the home charges of these days
 MIN_N = 3  # a band group with fewer journeys shows only the count
 BAND_C = 5  # outside temperature band width, °C
+LINK_MS = 3_600_000  # a preheat belongs to a journey that starts within this after it
 
 
 @dataclass
@@ -44,6 +45,16 @@ def from_states(frames: list[tuple[int, str]], join_ms: int = JOIN_MS) -> list[P
         else:
             out.append(Preheat(start=t, end=t, source="state"))
     return out
+
+
+def stretch(ps: list[Preheat], minutes: list[tuple[int, float | None, float | None]]) -> None:
+    """Widen each preheat to the meter block that overlaps it: the car app can
+    wake after the heater starts and sleep before it stops. The caller bounds
+    the minutes, so a block never reaches far back into a charge."""
+    for b in blocks(minutes):
+        for p in ps:
+            if b.start <= p.end and p.start <= b.end:
+                p.start, p.end = min(p.start, b.start), max(p.end, b.end)
 
 
 def from_meter(
@@ -132,11 +143,12 @@ def home_prices(rows: list[dict], now: int) -> dict[str, float]:
 
 
 def link(ps: list[Preheat], journey_starts: list[int]) -> None:
-    """Each preheat belongs to the first journey that starts after it."""
+    """Each preheat belongs to the first journey that starts after it, when
+    that is within an hour."""
     js = sorted(journey_starts)
     for p in ps:
         i = bisect.bisect_left(js, p.end)
-        p.journey = js[i] if i < len(js) else None
+        p.journey = js[i] if i < len(js) and js[i] - p.end <= LINK_MS else None
 
 
 def inside_charge(ps: list[Preheat], home_charges: list[tuple[int, int]]) -> None:
@@ -189,6 +201,8 @@ def journey_rows(r, outdoor: list[tuple[int, float]]) -> list[dict]:
     (the last reading in the hour before), and its preheat and battery numbers."""
     ts = [t for t, _c in outdoor]
     with_pre = {p.journey for p in r.preheats}
+    no_kwh = {p.journey for p in r.preheats if p.wall_kwh is None}
+    no_eur = {p.journey for p in r.preheats if p.cost_eur is None}
     out = []
     for j in r.journeys:
         if j.label != "commute":
@@ -201,9 +215,9 @@ def journey_rows(r, outdoor: list[tuple[int, float]]) -> list[dict]:
                 "start": j.start,
                 "outdoor_c": c,
                 "preheat": pre,
-                "preheat_kwh": j.preheat_kwh,
+                "preheat_kwh": None if j.id in no_kwh else j.preheat_kwh,
                 "battery_kwh": j.kwh_used,
-                "eur": None if j.cost_eur is None else j.cost_eur + j.preheat_eur,
+                "eur": None if j.cost_eur is None or j.id in no_eur else j.cost_eur + j.preheat_eur,
                 "km": j.km,
             }
         )
@@ -231,9 +245,10 @@ def compare(rows: list[dict]) -> list[dict]:
         g = {"band_c": [lo, lo + BAND_C], "preheat": pre, "count": len(rs)}
         if len(rs) >= MIN_N:
             eur = [r["eur"] for r in rs if r.get("eur") is not None]
+            pre = [r["preheat_kwh"] for r in rs if r.get("preheat_kwh") is not None]
             km = sum(r["km"] or 0 for r in rs)
             g |= {
-                "preheat_kwh": sum(r["preheat_kwh"] or 0 for r in rs) / len(rs),
+                "preheat_kwh": sum(pre) / len(pre) if pre else None,
                 "battery_kwh": sum(r["battery_kwh"] or 0 for r in rs) / len(rs),
                 "eur": sum(eur) / len(eur) if eur else None,
                 "kwh_per_100km": sum(r["battery_kwh"] or 0 for r in rs) / km * 100 if km else None,

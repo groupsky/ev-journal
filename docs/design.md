@@ -150,15 +150,20 @@ driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
   measured: the preheat on the plug (the charger meter and the battery
   counters), and whole mornings with and without a preheat.
 - **A preheat** is a run of minutes with a car frame in `state =
-  plugged-preheat`, joined when the gap is under 5 min. **Fallback** when the
+  plugged-preheat`, joined when the gap is under 5 min, then widened to the
+  charger meter block that overlaps it (at most 10 min earlier and 1 h
+  later): the car app can sleep while the heater runs. **Fallback** when the
   car app was not awake: a charger meter block above 150 W after a home
   charge (per `ioniq_sessions`) has ended and before the next trip, with no
   SoC rise, and not at the time of a known preheat. The fallback looks at most
-  24 h after the charge.
+  24 h after the charge, and never past the next charge. Preheats from before
+  the car app had the `plugged-preheat` state, and that homy saw as a short
+  charge, are not found.
 - **Numbers per preheat:** wall kWh = meter total at its last minute minus
   the total before its first; battery kWh = Δ `cum_out_kwh` − Δ `cum_in_kwh`;
   outside °C = the car's `hvac outdoor_c` and `ambient c`, 30 min mean, at
-  most 1 h before the start; it belongs to the next journey.
+  most 1 h before the start; it belongs to the next journey when that starts
+  within 1 h, else to none.
 - **Cost** = wall kWh × the home price of its tariff zone (day or night, as
   in [forecast.md](forecast.md)) + battery kWh × the pool price at the next
   journey's first trip ([price.md](price.md)). The home price per zone is
@@ -171,7 +176,8 @@ driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
   `spent_eur`; it shows only as heating. `ev_preheat.in_charge` marks it.
 - **Preheat or not** (`/heating/compare`): commute journeys in 5 °C bands of
   the outside temperature at the start, with and without a preheat. Means
-  only from 3 journeys up. `dry-run` prints the same table without money.
+  only from 3 journeys up. A journey whose preheat has no kWh or no € is left
+  out of that mean. `dry-run` prints the same table without money.
 - **Battery heater.** The car gives `heater_1` and `heater_2` in `bms/2105`
   and no power. `dry-run` counts the 10 min buckets where a heater reading is
   more than 2 °C above the warmest module (`temp_max` of `bms/2101`), and how

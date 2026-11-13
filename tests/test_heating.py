@@ -173,3 +173,31 @@ def test_battery_heater_check():
     on = heating.heater_on(hs, ms)
     assert on == [T0 + b]
     assert heating.on_minutes(on, [(T0, T0 + 2 * b), (T0 + 3 * b, T0 + 5 * b)], b) == [10.0, 0.0]
+
+
+def test_stretch_to_the_meter_block():
+    # The meter runs 06:00-06:24; the car app saw only 06:05-06:10.
+    rows = minutes([(5, 0), (25, 4000), (10, 0)], t=T0 - 5 * MIN)
+    p = Preheat(T0 + 5 * MIN, T0 + 10 * MIN, "state")
+    heating.stretch([p], rows)
+    assert (p.start, p.end) == (T0, T0 + 24 * MIN)
+    assert abs(heating.wall_kwh(rows, p) - 25 * 4 / 60) < 0.01
+
+
+def test_link_only_within_an_hour():
+    ps = [Preheat(T0, T0 + 20 * MIN, "state")]
+    heating.link(ps, [T0 + 20 * MIN + 2 * 3_600_000])  # a journey two hours later
+    assert ps[0].journey is None
+
+
+def test_unknown_preheat_numbers_stay_unknown():
+    from ev_journal.journeys import Journey, Result, Trip
+
+    j = Journey(trips=[Trip(T0 + 30 * MIN, T0 + 60 * MIN, kwh=4.0)], stops=[])
+    j.label, j.trips[0].km, j.trips[0].cost_eur = "commute", 20.0, 1.0
+    r = Result(trips=[], journeys=[j], outings=[], months=[])
+    heating.totals(r, [Preheat(T0, T0 + 20 * MIN, "meter", journey=j.id)], TZ)
+    row = heating.journey_rows(r, [(T0, -2.0)])[0]
+    assert row["preheat"] and row["preheat_kwh"] is None and row["eur"] is None
+    g = heating.compare([row, {**row, "preheat_kwh": 2.0, "eur": 1.5}, {**row, "preheat_kwh": 4.0}])
+    assert g[0]["preheat_kwh"] == 3.0 and g[0]["eur"] == 1.5
