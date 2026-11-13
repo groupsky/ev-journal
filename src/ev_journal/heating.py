@@ -72,7 +72,7 @@ def from_meter(
         inside = [v for _t, v in soc[lo:hi]]
         if before is not None and inside and max(inside) > before:
             continue  # the SoC rose: a charge, not a preheat
-        out.append(Preheat(start=b.start, end=b.end + MIN, source="meter"))
+        out.append(Preheat(start=b.start, end=b.end, source="meter"))
     return out
 
 
@@ -165,6 +165,49 @@ def charge_costs(costs: dict[int, float], ps: list[Preheat], prices: dict[str, f
     for p in ps:
         if p.in_charge in costs and p.wall_kwh is not None and p.zone in prices:
             costs[p.in_charge] = max(costs[p.in_charge] - p.wall_kwh * prices[p.zone], 0.0)
+
+
+def totals(r, ps: list[Preheat], tz: ZoneInfo) -> None:
+    """Keep the preheats on r, and sum their wall kWh and € on the journey
+    they belong to and on the month they start in."""
+    from ev_journal.journeys import month_key
+
+    r.preheats = sorted(ps, key=lambda p: p.start)
+    journeys = {j.id: j for j in r.journeys}
+    months = {m.key: m for m in r.months}
+    for p in r.preheats:
+        targets = [journeys.get(p.journey), months.get(month_key(p.start, tz)[0])]
+        for x in targets:
+            if x is None:
+                continue
+            x.preheat_kwh += p.wall_kwh or 0.0
+            x.preheat_eur += p.cost_eur or 0.0
+
+
+def journey_rows(r, outdoor: list[tuple[int, float]]) -> list[dict]:
+    """One row per commute journey for compare(): outdoor_c at its start
+    (the last reading in the hour before), and its preheat and battery numbers."""
+    ts = [t for t, _c in outdoor]
+    with_pre = {p.journey for p in r.preheats}
+    out = []
+    for j in r.journeys:
+        if j.label != "commute":
+            continue
+        i = bisect.bisect_right(ts, j.start)
+        c = outdoor[i - 1][1] if i and j.start - ts[i - 1] <= 3_600_000 else None
+        pre = j.id in with_pre
+        out.append(
+            {
+                "start": j.start,
+                "outdoor_c": c,
+                "preheat": pre,
+                "preheat_kwh": j.preheat_kwh,
+                "battery_kwh": j.kwh_used,
+                "eur": None if j.cost_eur is None else j.cost_eur + j.preheat_eur,
+                "km": j.km,
+            }
+        )
+    return out
 
 
 def band(c: float) -> int:

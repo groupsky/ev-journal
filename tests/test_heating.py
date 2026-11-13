@@ -39,7 +39,7 @@ def test_meter_fallback():
     pre_start = T0 + 30 * MIN
     soc = [(T0 - MIN, 80.0), (pre_start + 5 * MIN, 80.0)]
     ps = heating.from_meter(rows, [T0], [T0 + 70 * MIN], soc, [])
-    assert [(p.start, p.end, p.source) for p in ps] == [(pre_start, pre_start + 20 * MIN, "meter")]
+    assert [(p.start, p.end, p.source) for p in ps] == [(pre_start, pre_start + 19 * MIN, "meter")]
     # Not when the SoC rose (a charge), not when a trip came between, not
     # when the car app already gave a preheat at that time.
     assert (
@@ -143,3 +143,24 @@ def test_compare_bands_groups_and_minimum():
     assert "battery_kwh" not in out[0]
     assert out[1]["preheat_kwh"] == 2.0 and out[1]["eur"] == 1.0
     assert out[2]["kwh_per_100km"] == 20.0
+
+
+def test_totals_and_journey_rows():
+    from ev_journal.journeys import Journey, Month, Result, Trip
+
+    j1 = Journey(trips=[Trip(T0 + 30 * MIN, T0 + 60 * MIN, kwh=4.0, km_homy=20.0)], stops=[])
+    j2 = Journey(trips=[Trip(T0 + DAY, T0 + DAY + 30 * MIN, kwh=5.0, km_homy=20.0)], stops=[])
+    for j in (j1, j2):
+        j.label, j.trips[0].km, j.trips[0].cost_eur = "commute", 20.0, 1.0
+    m = Month(start=T0 - 14 * DAY, key="2026-01")
+    r = Result(trips=[], journeys=[j1, j2], outings=[], months=[m])
+    p = Preheat(T0, T0 + 20 * MIN, "state", wall_kwh=2.0, cost_eur=0.2, journey=j1.id)
+    heating.totals(r, [p], TZ)
+    assert (j1.preheat_kwh, j1.preheat_eur, j2.preheat_kwh) == (2.0, 0.2, 0.0)
+    assert (m.preheat_kwh, m.preheat_eur) == (2.0, 0.2)
+    rows = heating.journey_rows(r, [(T0, -2.0), (T0 + DAY - 2 * 3_600_000, 3.0)])
+    assert [(x["outdoor_c"], x["preheat"], x["battery_kwh"]) for x in rows] == [
+        (-2.0, True, 4.0),
+        (None, False, 5.0),  # the last reading is older than an hour
+    ]
+    assert abs(rows[0]["eur"] - 1.2) < 1e-9

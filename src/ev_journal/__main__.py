@@ -8,6 +8,7 @@ dry-run: read and recompute, print counts per month, what the plug check
   would decide now and the reminders it would send, write nothing.
 """
 
+import bisect
 import shutil
 import statistics
 import sys
@@ -23,6 +24,7 @@ from ev_journal import (
     cleanup,
     forecast,
     health,
+    heating,
     homecharge,
     outputs,
     places,
@@ -63,10 +65,57 @@ def compute(s: Settings) -> Result:
         labels=labels,
     )
     home = source.home_costs(db)
-    price.apply(r, {**away_costs, **home}, set(home), ZoneInfo(s.tz))
+    costs = {**away_costs, **home}
+    ps, prices, outdoor = preheats(s, db, r, set(home), start, end)
+    heating.charge_costs(costs, ps, prices)
+    price.apply(r, costs, set(home), ZoneInfo(s.tz))
+    first_trip = {j.id: j.trips[0] for j in r.journeys}
+    for p in ps:
+        t = first_trip.get(p.journey)
+        p.cost_eur = heating.cost(p, prices, t.price_eur_per_kwh if t else None)
+    heating.totals(r, ps, ZoneInfo(s.tz))
+    r.heating_rows = heating.journey_rows(r, outdoor)
     home_charge_model(s, db, r, set(home), end)
     advice(s, db, r)
     return r
+
+
+PREHEAT_SEARCH_MS = 24 * 3_600_000  # the meter fallback looks this far after a home charge
+
+
+def preheats(s: Settings, db: Influx, r: Result, home: set[int], start: int, end: int):
+    """The preheats on the plug with their kWh, zone, journey and home
+    charge, the home prices by zone and the outside temperature (#47)."""
+    tz = ZoneInfo(s.tz)
+    ps = heating.from_states(source.preheat_minutes(db, start, end))
+    home_charges = [
+        c for c in r.charges if c.start in home or (c.place is not None and c.place.kind == "home")
+    ]
+    trip_starts = [t.start for t in r.trips]
+    for c in home_charges:
+        nxt = next((t for t in trip_starts if t > c.end), c.end + PREHEAT_SEARCH_MS)
+        w0, w1 = c.end, min(nxt, c.end + PREHEAT_SEARCH_MS)
+        if w1 - w0 < 60_000:
+            continue
+        mins = source.meter_minutes(db, w0 - 60_000, w1)
+        ps += heating.from_meter(
+            mins, [c.end], trip_starts, source.soc_minutes(db, w0 - 5 * 60_000, w1), ps
+        )
+    outdoor = source.outdoor(db, start, end)
+    ots = [t for t, _c in outdoor]
+    for p in ps:
+        mins = source.meter_minutes(db, p.start - 2 * 60_000, p.end + 60_000)
+        p.wall_kwh = heating.wall_kwh(mins, p)
+        p.battery_kwh = heating.battery_kwh(source.counters(db, p.start - 10 * 60_000, p.end), p)
+        i = bisect.bisect_right(ots, p.start)
+        p.outdoor_c = outdoor[i - 1][1] if i and p.start - ots[i - 1] <= 3_600_000 else None
+        p.zone = heating.zone(p.start, tz)
+    heating.link(ps, [j.start for j in r.journeys])
+    heating.inside_charge(ps, [(c.start, c.end) for c in home_charges])
+    prices = heating.home_prices(
+        source.home_charge_rows(db, end - heating.PRICE_DAYS * 86_400_000), end
+    )
+    return sorted(ps, key=lambda p: p.start), prices, outdoor
 
 
 def advice(s: Settings, db: Influx, r: Result) -> None:

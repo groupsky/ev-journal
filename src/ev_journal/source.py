@@ -217,3 +217,53 @@ def health_frames(db: Influx, start: int, end: int):
         module_spread=[(int(r["time"]), _f(r["value"])) for r in spread],
         last_aux_before=int(prev[0]["time"]) if prev else None,
     )
+
+
+MONTH = 30 * DAY
+
+
+def preheat_minutes(db: Influx, start: int, end: int) -> list[tuple[int, str]]:
+    """Minutes with a car frame in state plugged-preheat (#47): (minute, state)."""
+    out = []
+    for t0 in range(start, end, MONTH):
+        t1 = min(t0 + MONTH, end)
+        rows = db.query(
+            "SELECT count(*) FROM ioniq WHERE state = 'plugged-preheat'"
+            f" AND time >= {t0}ms AND time < {t1}ms GROUP BY time(1m) fill(none)"
+        )
+        out += [(int(r["time"]), "plugged-preheat") for r in rows]
+    return out
+
+
+def outdoor(db: Influx, start: int, end: int) -> list[tuple[int, float]]:
+    """The car's outside temperature, mean per 30 min: (t, °C), from the
+    hvac and ambient readings (#47)."""
+    by: dict[int, list[float]] = {}
+    for t0 in range(start, end, MONTH):
+        t1 = min(t0 + MONTH, end)
+        for group, field in (("hvac", "outdoor_c"), ("ambient", "c")):
+            rows = db.query(
+                f"SELECT mean({field}) FROM ioniq WHERE \"group\" = '{group}'"
+                f" AND time >= {t0}ms AND time < {t1}ms GROUP BY time(30m) fill(none)"
+            )
+            for r in rows:
+                if r["mean"] is not None:
+                    by.setdefault(int(r["time"]), []).append(float(r["mean"]))
+    return [(t, sum(v) / len(v)) for t, v in sorted(by.items())]
+
+
+def soc_minutes(db: Influx, start: int, end: int) -> list[tuple[int, float]]:
+    """The last SoC of each minute: (t, %)."""
+    rows = db.query(
+        "SELECT last(soc) FROM ioniq WHERE \"group\" = 'bms/2101'"
+        f" AND time >= {start}ms AND time < {end}ms GROUP BY time(1m) fill(none)"
+    )
+    return [(int(r["time"]), float(r["last"])) for r in rows if r["last"] is not None]
+
+
+def home_charge_rows(db: Influx, start: int) -> list[dict]:
+    """The day and night split of the home charges since start (#47)."""
+    return db.query(
+        "SELECT cost_day_eur, meter_kwh_day, cost_night_eur, meter_kwh_night"
+        f" FROM ioniq_charges WHERE place = 'home' AND time >= {start}ms"
+    )
