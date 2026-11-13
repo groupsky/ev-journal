@@ -1,4 +1,4 @@
-"""The SQLite store: places, routes, journey labels and the command log.
+"""The SQLite store: places, routes, journey labels, the command log and sent notices.
 
 Places and routes have a version and a delete marker, so an offline client
 can sync with `changed_since`. One user: the last write wins.
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS labels (journey_id INTEGER PRIMARY KEY, label TEXT,
 CREATE TABLE IF NOT EXISTS commands (client_id TEXT PRIMARY KEY, time INTEGER NOT NULL,
   text TEXT NOT NULL, action TEXT NOT NULL, place_id TEXT, route_id TEXT,
   received_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS notices (id TEXT PRIMARY KEY, time INTEGER NOT NULL);
 """
 
 # Columns added to the places table of #3.
