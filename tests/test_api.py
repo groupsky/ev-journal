@@ -347,3 +347,35 @@ def test_days_follow_the_local_time_zone_on_a_dst_day(data_dir):
     # A day's range in ms (as the client gets it for a jump) picks the same journeys.
     one = c.get("/journeys/days", params={"from": t0, "to": t0 + 23 * h - 1}).json()
     assert one == [d for d in days if d["day"] == "2026-03-29"]
+
+
+def test_heating_compare(data_dir):
+    import time
+
+    now = int(time.time() * 1000)
+
+    def row(days_ago, c, pre):
+        return {
+            "start": now - days_ago * 86_400_000,
+            "outdoor_c": c,
+            "preheat": pre,
+            "preheat_kwh": 2.0 if pre else 0.0,
+            "battery_kwh": 4.0,
+            "eur": 1.0,
+            "km": 20.0,
+        }
+
+    rows = [row(1, -3.0, True), row(2, -2.0, True), row(3, -1.0, True), row(4, -4.0, False)]
+    rows += [row(100, -3.0, False)] * 5  # older than 90 days
+    c = CheckedClient(
+        create_app(places.store_path(data_dir), TOKEN, UTC, heating_rows=lambda: rows)
+    )
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    got = c.get("/heating/compare").json()
+    assert [(g["band_c"], g["preheat"], g["count"]) for g in got] == [
+        ([-5, 0], False, 1),
+        ([-5, 0], True, 3),
+    ]
+    assert got[0]["battery_kwh"] is None and got[1]["preheat_kwh"] == 2.0
+    assert len(c.get("/heating/compare?days=120").json()) == 2
+    assert c.get("/heating/compare?days=120").json()[0]["count"] == 6

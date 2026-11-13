@@ -11,6 +11,7 @@ import json
 import sqlite3
 import statistics
 import sys
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -24,7 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ev_journal import charges, forecast, tyres, upkeep
+from ev_journal import charges, forecast, heating, tyres, upkeep
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -215,6 +216,26 @@ class FanRow(BaseModel):
     step: int = Field(description="fan_status, 1–9.")
     count: int = Field(description="Frames at this step in the month.")
     fan_feedback_median: float
+
+
+class HeatingGroup(BaseModel):
+    band_c: list[int] = Field(
+        description="Outside temperature band at the journey start, [low, high) °C."
+    )
+    preheat: bool = Field(description="Journeys with a preheat on the plug before them.")
+    count: int
+    preheat_kwh: float | None = Field(
+        None, description="Mean preheat wall kWh. Null under 3 journeys."
+    )
+    battery_kwh: float | None = Field(
+        None, description="Mean journey battery kWh. Null under 3 journeys."
+    )
+    eur: float | None = Field(
+        None, description="Mean € of preheat + journey. Null under 3 journeys or no price."
+    )
+    kwh_per_100km: float | None = Field(
+        None, description="Journey battery kWh per 100 km. Null under 3 journeys."
+    )
 
 
 class TrackPoint(BaseModel):
@@ -500,6 +521,7 @@ def create_app(
     tyre_rules: tyres.Rules | None = None,
     health_daily: Callable[[date, date], list[dict]] = lambda _a, _b: [],
     health_fan: Callable[[int], list[dict]] = lambda _n: [],
+    heating_rows: Callable[[], list[dict]] = list,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -509,7 +531,8 @@ def create_app(
     places_changed runs after a place is created, changed or deleted.
     km_now gives the last odometer reading (t, km), or None. temps gives one
     mean outside temperature per day with a reading, oldest first.
-    health_daily and health_fan give the health series (#49)."""
+    health_daily and health_fan give the health series (#49). heating_rows
+    gives the commute journeys of the last recompute (heating.journey_rows)."""
     tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
@@ -955,6 +978,14 @@ def create_app(
         """Per month and fan step: frame count and median fan_feedback, over
         the last `months` months with this one, oldest first."""
         return health_fan(months)
+
+    @r.get("/heating/compare", response_model=list[HeatingGroup])
+    def get_heating_compare(days: int = Query(90, ge=1, le=3660)):
+        """Commute journeys of the last `days` days, with and without a
+        preheat on the plug, by 5 °C band of the outside temperature at the
+        start. A group under 3 journeys has only the count."""
+        since = int(time.time() * 1000) - days * 86_400_000
+        return heating.compare([j for j in heating_rows() if j["start"] >= since])
 
     @r.post(
         "/commands",
