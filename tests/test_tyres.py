@@ -1,9 +1,13 @@
 """Tyre sets with made-up sets and temperatures (#45)."""
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import TOKEN, CheckedClient
 
+from ev_journal import places
+from ev_journal.api import create_app
 from ev_journal.tyres import Rules, age_years, dot_date, km_per_set, overview
 
 TODAY = date(2030, 6, 15)
@@ -89,3 +93,88 @@ def test_no_hint():
     assert hint_of("summer", ("winter", 1), cold) is None  # the other one is retired
     assert hint_of("summer", ("winter", 0), cold[:6]) is None  # fewer than 7 days
     assert overview([tset("a", "summer")], [], TODAY, 0, cold, RULES)["hint"] is None
+
+
+# The API, with a made-up odometer and temperatures.
+
+
+@pytest.fixture
+def env():
+    return {"odo": (1_900_000_000_000, 50_000.0), "temps": [5.0] * 7}
+
+
+@pytest.fixture
+def api(data_dir, env):
+    app = create_app(
+        places.store_path(data_dir),
+        TOKEN,
+        ZoneInfo("UTC"),
+        km_now=lambda: env["odo"],
+        temps=lambda: env["temps"],
+    )
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    return c
+
+
+SUMMER = {"name": "Test summer", "season": "summer", "dot": "0721"}
+WINTER = {"name": "Test winter", "season": "winter", "dot": "1023", "size": "000/00 R00"}
+
+
+def test_api_sets_swaps_and_overview(api, env):
+    s = api.post("/tyres/sets", json=SUMMER).json()["id"]
+    w = api.post("/tyres/sets", json=WINTER).json()["id"]
+    assert api.get("/tyres").json()["fitted"] is None
+    api.post("/tyres/swaps", json={"set_id": w, "date": "2020-11-01", "km": 40_000})
+    got = api.post("/tyres/swaps", json={"set_id": s, "date": "2021-04-01", "km": 45_000})
+    assert got.status_code == 201 and got.json()["km"] == 45_000
+    # date and km default to today and the odometer
+    env["odo"] = (1_900_000_000_000, 46_000.0)
+    got = api.post("/tyres/swaps", json={"set_id": w}).json()
+    assert got["km"] == 46_000 and got["date"] == datetime.now(ZoneInfo("UTC")).date().isoformat()
+    env["odo"] = (1_900_000_000_000, 47_000.0)
+    t = api.get("/tyres").json()
+    assert t["fitted"]["id"] == w and t["km_now"] == 47_000 and t["hint"] is None
+    by = {x["id"]: x for x in t["sets"]}
+    assert by[w]["km"] == 6_000 and by[s]["km"] == 1_000 and by[s]["fitted_since"] is None
+    assert [x["km"] for x in api.get("/tyres/swaps").json()] == [46_000, 45_000, 40_000]
+    assert [x["id"] for x in api.get("/tyres/sets").json()] == [s, w]  # by name
+
+
+def test_api_hint_and_failing_inputs(data_dir, api, env):
+    s = api.post("/tyres/sets", json=SUMMER).json()["id"]
+    api.post("/tyres/sets", json=WINTER)
+    api.post("/tyres/swaps", json={"set_id": s})
+    assert api.get("/tyres").json()["hint"] == "winter"
+
+    def broken():
+        raise RuntimeError("no influx")
+
+    app = create_app(
+        places.store_path(data_dir), TOKEN, ZoneInfo("UTC"), km_now=broken, temps=broken
+    )
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    t = c.get("/tyres").json()
+    assert t["hint"] is None and t["km_now"] is None and t["fitted"]["id"] == s
+
+
+def test_api_bad_dot_is_422(api):
+    for bad in ["721", "5421", "abcd", "0021"]:
+        assert api.post("/tyres/sets", json={**SUMMER, "dot": bad}).status_code == 422
+    assert api.post("/tyres/sets", json={**SUMMER, "dot": ""}).status_code == 201
+
+
+def test_api_delete_and_swap_errors(api, env):
+    s = api.post("/tyres/sets", json=SUMMER).json()["id"]
+    w = api.post("/tyres/sets", json=WINTER).json()["id"]
+    assert api.delete(f"/tyres/sets/{w}").status_code == 200
+    assert api.post("/tyres/swaps", json={"set_id": w}).status_code == 422
+    assert api.post("/tyres/swaps", json={"set_id": s}).status_code == 201
+    assert api.delete(f"/tyres/sets/{s}").status_code == 409
+    got = api.put(f"/tyres/sets/{s}", json={**SUMMER, "retired": True, "version": 1}).json()
+    assert got["version"] == 2 and api.get("/tyres/sets").json()[0]["retired"] is True
+    assert api.put("/tyres/sets/nope", json=SUMMER).status_code == 404
+    env["odo"] = None
+    assert api.post("/tyres/swaps", json={"set_id": s}).status_code == 422
+    assert api.post("/tyres/swaps", json={"set_id": s, "km": 10}).status_code == 201

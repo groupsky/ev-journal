@@ -1149,6 +1149,338 @@
         "title": "TrackPoint",
         "type": "object"
       },
+      "TyreSet": {
+        "properties": {
+          "age_warning": {
+            "description": "Older than EVJ_TYRE_MAX_AGE_YEARS.",
+            "title": "Age Warning",
+            "type": "boolean"
+          },
+          "age_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the DOT code; null without one.",
+            "title": "Age Years"
+          },
+          "dot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dot"
+          },
+          "fitted_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The swap day, for the set on now.",
+            "title": "Fitted Since"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "km": {
+            "description": "Sum of the odometer change over each time it was on.",
+            "title": "Km",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "retired": {
+            "title": "Retired",
+            "type": "boolean"
+          },
+          "season": {
+            "enum": [
+              "winter",
+              "summer",
+              "all"
+            ],
+            "title": "Season",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "season",
+          "size",
+          "dot",
+          "retired",
+          "note",
+          "version",
+          "updated_at",
+          "km",
+          "age_years",
+          "age_warning",
+          "fitted_since"
+        ],
+        "title": "TyreSet",
+        "type": "object"
+      },
+      "TyreSetIn": {
+        "properties": {
+          "dot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The DOT date code WWYY, e.g. \"0721\".",
+            "title": "Dot"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "retired": {
+            "default": false,
+            "title": "Retired",
+            "type": "boolean"
+          },
+          "season": {
+            "enum": [
+              "winter",
+              "summer",
+              "all"
+            ],
+            "title": "Season",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version the client saw.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name",
+          "season"
+        ],
+        "title": "TyreSetIn",
+        "type": "object"
+      },
+      "TyreSwap": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "km": {
+            "title": "Km",
+            "type": "number"
+          },
+          "set_id": {
+            "title": "Set Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "km",
+          "set_id",
+          "created_at"
+        ],
+        "title": "TyreSwap",
+        "type": "object"
+      },
+      "TyreSwapIn": {
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default: today.",
+            "title": "Date"
+          },
+          "km": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default: the last odometer reading.",
+            "title": "Km"
+          },
+          "set_id": {
+            "title": "Set Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "set_id"
+        ],
+        "title": "TyreSwapIn",
+        "type": "object"
+      },
+      "Tyres": {
+        "properties": {
+          "age_warning": {
+            "description": "Names of sets, not retired, that are too old.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Age Warning",
+            "type": "array"
+          },
+          "fitted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TyreSet"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The set put on by the last swap."
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "winter",
+                  "summer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time to swap to this season.",
+            "title": "Hint"
+          },
+          "km_now": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last odometer reading; null if none yet.",
+            "title": "Km Now"
+          },
+          "sets": {
+            "description": "By name.",
+            "items": {
+              "$ref": "#/components/schemas/TyreSet"
+            },
+            "title": "Sets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "km_now",
+          "fitted",
+          "hint",
+          "age_warning",
+          "sets"
+        ],
+        "title": "Tyres",
+        "type": "object"
+      },
       "UpkeepDoneIn": {
         "properties": {
           "date": {
@@ -3145,6 +3477,376 @@
           }
         },
         "summary": "Put Route"
+      }
+    },
+    "/tyres": {
+      "get": {
+        "description": "The set on now, km and age of each set, and the season-swap hint.",
+        "operationId": "get_tyres_tyres_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tyres"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Tyres"
+      }
+    },
+    "/tyres/sets": {
+      "get": {
+        "operationId": "list_tyre_sets_tyres_sets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TyreSet"
+                  },
+                  "title": "Response List Tyre Sets Tyres Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Tyre Sets"
+      },
+      "post": {
+        "operationId": "create_tyre_set_tyres_sets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TyreSetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Written"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Create Tyre Set"
+      }
+    },
+    "/tyres/sets/{set_id}": {
+      "delete": {
+        "description": "A set with swaps cannot go (409): retire it instead.",
+        "operationId": "delete_tyre_set_tyres_sets__set_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Written"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Delete Tyre Set"
+      },
+      "put": {
+        "operationId": "put_tyre_set_tyres_sets__set_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "title": "Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TyreSetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Written"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Put Tyre Set"
+      }
+    },
+    "/tyres/swaps": {
+      "get": {
+        "description": "The swap log, newest first.",
+        "operationId": "list_tyre_swaps_tyres_swaps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TyreSwap"
+                  },
+                  "title": "Response List Tyre Swaps Tyres Swaps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Tyre Swaps"
+      },
+      "post": {
+        "description": "Put a set on; the one on before comes off at the same moment.",
+        "operationId": "create_tyre_swap_tyres_swaps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TyreSwapIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TyreSwap"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Create Tyre Swap"
       }
     },
     "/upkeep": {

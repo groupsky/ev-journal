@@ -22,9 +22,9 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from ev_journal import charges, forecast, upkeep
+from ev_journal import charges, forecast, tyres, upkeep
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -329,6 +329,61 @@ class UpkeepLog(BaseModel):
     created_at: int
 
 
+class TyreSetIn(BaseModel):
+    name: str = Field(min_length=1)
+    season: Literal["winter", "summer", "all"]
+    size: str | None = None
+    dot: str | None = Field(default=None, description='The DOT date code WWYY, e.g. "0721".')
+    retired: bool = False
+    note: str | None = None
+    version: int | None = Field(default=None, description="The version the client saw.")
+
+    @field_validator("dot")
+    @classmethod
+    def _dot(cls, v: str | None) -> str | None:
+        if v:
+            tyres.dot_date(v)  # ValueError: 422
+        return v or None
+
+
+class TyreSet(BaseModel):
+    id: str
+    name: str
+    season: Literal["winter", "summer", "all"]
+    size: str | None
+    dot: str | None
+    retired: bool
+    note: str | None
+    version: int
+    updated_at: int
+    km: float = Field(description="Sum of the odometer change over each time it was on.")
+    age_years: float | None = Field(description="From the DOT code; null without one.")
+    age_warning: bool = Field(description="Older than EVJ_TYRE_MAX_AGE_YEARS.")
+    fitted_since: str | None = Field(description="The swap day, for the set on now.")
+
+
+class Tyres(BaseModel):
+    km_now: float | None = Field(description="The last odometer reading; null if none yet.")
+    fitted: TyreSet | None = Field(description="The set put on by the last swap.")
+    hint: Literal["winter", "summer"] | None = Field(description="Time to swap to this season.")
+    age_warning: list[str] = Field(description="Names of sets, not retired, that are too old.")
+    sets: list[TyreSet] = Field(description="By name.")
+
+
+class TyreSwapIn(BaseModel):
+    set_id: str
+    date: dt.date | None = Field(default=None, description="Default: today.")
+    km: float | None = Field(default=None, ge=0, description="Default: the last odometer reading.")
+
+
+class TyreSwap(BaseModel):
+    id: int
+    date: str
+    km: float
+    set_id: str
+    created_at: int
+
+
 def _place(r: sqlite3.Row) -> Place:
     return Place(
         id=r["id"],
@@ -417,6 +472,8 @@ def create_app(
     journey_list: Callable[[], list[dict]] = list,
     places_changed: Callable[[], None] = lambda: None,
     km_now: Callable[[], tuple[int, float] | None] = lambda: None,
+    temps: Callable[[], list[float]] = list,
+    tyre_rules: tyres.Rules | None = None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -424,7 +481,9 @@ def create_app(
     points of a journey (None for an unknown journey) and journey_list the
     journeys of the last recompute as in the MQTT summary, oldest first.
     places_changed runs after a place is created, changed or deleted.
-    km_now gives the last odometer reading (t, km), or None."""
+    km_now gives the last odometer reading (t, km), or None. temps gives one
+    mean outside temperature per day with a reading, oldest first."""
+    tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
         conn = sqlite3.connect(db_path, isolation_level=None)
@@ -714,6 +773,75 @@ def create_app(
             "SELECT * FROM upkeep_log WHERE item_id = ? ORDER BY date DESC, id DESC", (item_id,)
         )
         return [UpkeepLog(**dict(x)) for x in rows]
+
+    def tyre_cols(p: TyreSetIn) -> dict:
+        cols = p.model_dump(exclude={"version"})
+        cols["retired"] = int(p.retired)
+        return cols
+
+    def tyre_view(conn) -> dict:
+        with write_tx(conn, "DEFERRED"):
+            sets, swaps = tyres.load(conn)
+        try:
+            days = temps()
+        except Exception as e:  # no hint, the rest still answers
+            print(f"ev-journal: no outside temperature: {e!r}", file=sys.stderr)
+            days = []
+        return tyres.overview(sets, swaps, today(), odo(), days, tyre_rules)
+
+    @r.get("/tyres", response_model=Tyres)
+    def get_tyres(conn=Depends(db)):
+        """The set on now, km and age of each set, and the season-swap hint."""
+        return tyre_view(conn)
+
+    @r.get("/tyres/sets", response_model=list[TyreSet])
+    def list_tyre_sets(conn=Depends(db)):
+        return tyre_view(conn)["sets"]
+
+    @r.post("/tyres/sets", response_model=Written, status_code=201)
+    def create_tyre_set(p: TyreSetIn, conn=Depends(db)):
+        return save(conn, "tyre_sets", uuid.uuid4().hex[:12], tyre_cols(p), None, True)
+
+    @r.put("/tyres/sets/{set_id}", response_model=Written, responses=nf)
+    def put_tyre_set(set_id: str, p: TyreSetIn, conn=Depends(db)):
+        return save(conn, "tyre_sets", set_id, tyre_cols(p), p.version, False)
+
+    @r.delete(
+        "/tyres/sets/{set_id}", response_model=Written, responses={**nf, 409: {"model": Error}}
+    )
+    def delete_tyre_set(set_id: str, version: int | None = None, conn=Depends(db)):
+        """A set with swaps cannot go (409): retire it instead."""
+
+        def no_swaps():
+            if conn.execute("SELECT 1 FROM tyre_swaps WHERE set_id = ?", (set_id,)).fetchone():
+                raise Fail(409, "the set has swaps; retire it instead")
+
+        return remove(conn, "tyre_sets", set_id, version, no_swaps)
+
+    @r.post("/tyres/swaps", response_model=TyreSwap, status_code=201)
+    def create_tyre_swap(p: TyreSwapIn, conn=Depends(db)):
+        """Put a set on; the one on before comes off at the same moment."""
+        km = p.km if p.km is not None else odo()
+        if km is None:
+            raise Fail(422, "km: needed, there is no odometer reading")
+        day = (p.date or today()).isoformat()
+        with write_tx(conn):
+            if not conn.execute(
+                "SELECT 1 FROM tyre_sets WHERE id = ? AND deleted = 0", (p.set_id,)
+            ).fetchone():
+                raise Fail(422, "set_id: no such set")
+            cur = conn.execute(
+                "INSERT INTO tyre_swaps (date, km, set_id, created_at) VALUES (?, ?, ?, ?)",
+                (day, km, p.set_id, store.now_ms()),
+            )
+            row = conn.execute("SELECT * FROM tyre_swaps WHERE id = ?", (cur.lastrowid,))
+            return TyreSwap(**dict(row.fetchone()))
+
+    @r.get("/tyres/swaps", response_model=list[TyreSwap])
+    def list_tyre_swaps(conn=Depends(db)):
+        """The swap log, newest first."""
+        rows = conn.execute("SELECT * FROM tyre_swaps ORDER BY date DESC, km DESC, id DESC")
+        return [TyreSwap(**dict(x)) for x in rows]
 
     @r.put(
         "/journeys/{journey_id}/label",
