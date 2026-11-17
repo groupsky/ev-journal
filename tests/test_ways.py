@@ -60,3 +60,56 @@ def test_simplify_keeps_the_bend():
     pts = track(0.02)
     s = ways.simplify(pts)
     assert len(s) == 3 and s[1] == pts[50]
+
+
+def ms(y, m, d, hh, mm):
+    from datetime import datetime
+
+    return int(datetime(y, m, d, hh, mm, tzinfo=UTC).timestamp() * 1000)
+
+
+RHYTHM = {"hols": set(), "ranges": (), "picks": {}}
+
+
+def commute(not_me: bool = False) -> list[dict]:
+    """Made-up workdays 2025-12-08 to 2026-01-09: home to work between 07:20
+    and 07:40, work to home at 17:00. 2025-12-08 is a Monday."""
+    from datetime import date, timedelta
+
+    rows, d = [], date(2025, 12, 8)
+    while d <= date(2026, 1, 9):
+        if d.weekday() < 5:
+            mm = 20 + (d.day % 5) * 5  # 20, 25, 30, 35, 40
+            go = row(0, track(0.0), "home", "work")
+            go["start"] = ms(d.year, d.month, d.day, 7, mm)
+            back = row(0, track(0.0)[::-1], "work", "home")
+            back["start"] = ms(d.year, d.month, d.day, 17, 0)
+            rows += [go | {"not_me": not_me}, back | {"not_me": not_me}]
+        d += timedelta(days=1)
+    return rows
+
+
+def test_next_trip_from_home_in_the_morning():
+    t = ways.next_trip(commute(), RHYTHM, UTC, ms(2026, 1, 12, 6, 0))  # a Monday
+    assert t["found"] and (t["from"], t["to"], t["day"]) == ("home", "work", "2026-01-12")
+    assert t["day_type"] == "workday" and t["sure"] == 1.0 and t["pool_days"] == 20
+    assert t["start"] == "2026-01-12T07:25:00+00:00" and t["end"] == "2026-01-12T07:35:00+00:00"
+    assert t["way"]["found"] and t["way"]["support"] == 25
+
+
+def test_next_trip_after_the_window_and_on_a_weekend():
+    rows = commute()
+    rows.append(row(0, track(0.0), "home", "work") | {"start": ms(2026, 1, 12, 7, 30)})
+    t = ways.next_trip(rows, RHYTHM, UTC, ms(2026, 1, 12, 9, 0))  # now at work
+    assert (t["from"], t["to"], t["start"][:16]) == ("work", "home", "2026-01-12T17:00")
+    t = ways.next_trip(commute(), RHYTHM, UTC, ms(2026, 1, 10, 8, 0))  # a Saturday
+    assert t["found"] and t["day"] == "2026-01-12" and t["from"] == "home"
+
+
+def test_no_next_trip():
+    now = ms(2026, 1, 12, 6, 0)
+    assert not ways.next_trip(commute(), None, UTC, now)["found"]
+    assert not ways.next_trip(commute(not_me=True), RHYTHM, UTC, now)["found"]
+    rare = [r for r in commute() if r["start"] % (3 * DAY) < DAY]  # about a third of the days
+    t = ways.next_trip(rare, RHYTHM, UTC, now)
+    assert not t["found"] and t["start"] is None and t["way"] is None

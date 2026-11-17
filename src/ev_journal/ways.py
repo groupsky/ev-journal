@@ -7,16 +7,21 @@ journey that agrees with the most others, simplified.
 """
 
 import math
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from ev_journal import calendar_keys as ck
+from ev_journal import forecast as fc
 from ev_journal.geo import EARTH_M, thin
+from ev_journal.homecharge import quantile
 
 MIN_JOURNEYS = 3  # a way needs this many journeys
 MIN_SHARE = 0.5  # and this share of the journeys from A to B
 NEAR_M = 150.0  # a point this near the other track is on it
 SAME_SHARE = 0.9  # this share of points of each track on the other: the same way
 SIMPLIFY_M = 20.0
+MIN_SURE = 0.5  # a next trip needs a departure on this share of the pool days
+DAYS_AHEAD = 7
 STEP_M = 50.0  # tracks are compared at one point per this many metres
 
 
@@ -110,3 +115,91 @@ def usual_way(
     coords = [[round(p[2], 6), round(p[1], 6)] for p in line]
     out["line"] = {"type": "LineString", "coordinates": coords}
     return out
+
+
+def _local(ms: int, tz: ZoneInfo) -> datetime:
+    return datetime.fromtimestamp(ms / 1000, tz)
+
+
+def _pool(day: date, today: date, first: date, rhythm: dict) -> tuple[str, list[date]]:
+    """The day type of day and the past days (before today) the forecast
+    would learn from for it: same kind, same calendar keys, at least
+    MIN_POOL days, else the next simpler choice. No pool: an empty list."""
+    hols, ranges = rhythm["hols"], rhythm["ranges"]
+    dtype = fc.day_type(day, hols, ranges)
+    for choice in fc.chain(rhythm["picks"].get(fc.kind(dtype), ()), dtype):
+        v = ck.value(choice, day, dtype)
+        d = max(first, day - timedelta(days=ck.window(choice, fc.POOL_DAYS)))
+        pool = []
+        while d < today:
+            t = fc.day_type(d, hols, ranges)
+            if fc.kind(t) == fc.kind(dtype) and ck.value(choice, d, t) == v:
+                pool.append(d)
+            d += timedelta(days=1)
+        if len(pool) >= fc.MIN_POOL:
+            return dtype, pool
+    return dtype, []
+
+
+def next_trip(
+    rows: list[dict],
+    rhythm: dict | None,
+    tz: ZoneInfo,
+    now: int,
+    min_sure: float = MIN_SURE,
+    days_ahead: int = DAYS_AHEAD,
+) -> dict:
+    """The next likely departure from the place where the car is now.
+
+    For each day from today on, the pool of past days of the same calendar
+    rhythm as the forecast (#23, #25). A trip from A to B is likely when it
+    starts on at least min_sure of the pool days. Its window is the 25th to
+    75th percentile of its first start time on those days. The first window
+    that has not ended wins. rows as in usual_way, with "not_me"; those
+    journeys and journeys without both places do not count."""
+    none = {"found": False, "from": None, "to": None, "day": None, "day_type": None}
+    none |= {"start": None, "end": None, "sure": None, "pool_days": 0, "way": None}
+    js = sorted(
+        (r for r in rows if not r.get("not_me") and r["from"] and r["to"] and r["start"] <= now),
+        key=lambda r: r["start"],
+    )
+    if not js or rhythm is None:
+        return none
+    at = js[-1]["to"]  # where the car is now
+    local = _local(now, tz)
+    today, first = local.date(), _local(js[0]["start"], tz).date()
+    starts: dict[tuple[str, str], dict[date, int]] = {}  # first start per pair and day, minutes
+    for r in js:
+        if r["from"] == at:
+            t = _local(r["start"], tz)
+            day = starts.setdefault((r["from"], r["to"]), {})
+            day.setdefault(t.date(), t.hour * 60 + t.minute)
+    for n in range(days_ahead):
+        day = today + timedelta(days=n)
+        dtype, pool = _pool(day, today, first, rhythm)
+        best = None
+        for (frm, to), by_day in starts.items():
+            mins = [by_day[d] for d in pool if d in by_day]
+            sure = len(mins) / len(pool) if pool else 0.0
+            if sure < min_sure:
+                continue
+            midnight = datetime.combine(day, datetime.min.time(), tz)
+            t0, t1 = (midnight + timedelta(minutes=quantile(mins, q)) for q in (0.25, 0.75))
+            if t1 > local and (best is None or (t0, -sure) < (best[0], -best[2])):
+                best = (t0, t1, sure, frm, to)
+        if best:
+            t0, t1, sure, frm, to = best
+            way = usual_way(rows, frm, to, tz)
+            return {
+                "found": True,
+                "from": frm,
+                "to": to,
+                "day": day.isoformat(),
+                "day_type": dtype,
+                "start": t0.isoformat(),
+                "end": t1.isoformat(),
+                "sure": round(sure, 3),
+                "pool_days": len(pool),
+                "way": way if way["found"] else None,
+            }
+    return none
