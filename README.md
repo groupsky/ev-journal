@@ -62,6 +62,9 @@ Away charges and their price: [docs/charges.md](docs/charges.md). Price of
 trips and months: [docs/price.md](docs/price.md). SoC during a home charge
 and battery model drift: [docs/home-charge.md](docs/home-charge.md).
 Forecast and charging advice: [docs/forecast.md](docs/forecast.md).
+The usual way between two places (`GET /usual-way`) and the next likely trip
+(`GET /next-trip`), learned from past journeys:
+[docs/api.md](docs/api.md#usual-way-and-next-trip).
 
 ## Develop
 

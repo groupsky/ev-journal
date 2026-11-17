@@ -476,6 +476,7 @@ def plan(
     today = local.date()
     past = daily_need(r, tz, today - timedelta(days=1))
     picks, r.forecast_tries = pick(past, hols, ranges)
+    r.rhythm = {"hols": hols, "ranges": ranges, "picks": picks}
     # The effects model (#25): today's rule plus the effects of the key
     # families that win the walk-forward back-test; none: today's rule.
     hist = backtest(past, hols, len(past), ranges, picks)

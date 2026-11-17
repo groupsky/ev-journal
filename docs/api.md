@@ -123,6 +123,43 @@ points `{"t", "lat", "lon", "kwh_per_100km"}`, in time order:
 - A journey not in the last recompute gets `404`. A journey with no real
   fixes gets `[]`.
 
+## Usual way and next trip
+
+`GET /usual-way?from=PLACE&to=PLACE` gives the path most often driven from
+one place to another, learned from the journey tracks of the last recompute.
+
+- A journey counts when it starts at `from` and ends at `to` (place ids of
+  `GET /places`) and has real GPS fixes, up to the newest 100. `journeys` is
+  how many there are. Journeys marked "not me" count too: the car took that
+  way.
+- Two tracks take the same way when 90 % or more of the points of each (one
+  per 50 m) lie within about 150 m of the other. The way with the most
+  journeys wins; on a tie, the way of the newest journey.
+- `support` is how many journeys took it, `share` is `support / journeys`,
+  `first` and `last` are the local dates of its first and last journey.
+- `line` is a GeoJSON LineString (`[lon, lat]` pairs): the real track of the
+  journey that agrees with the most others, simplified to about 20 m.
+- `found` is `false` and `line` is `null` when the way has fewer than
+  `min_journeys` journeys (default 3) or a share under `min_share` (default
+  0.5). Then the client should not guess. An unknown or deleted place gets
+  `404`.
+
+`GET /next-trip` gives the next likely departure from where the car is now
+(the end place of the last journey).
+
+- For each day from today, up to 7 days, the pool is the past days the
+  forecast learns from for that day: the same kind (workday or off day) and
+  the same calendar keys that the forecast picked (docs/forecast.md), with
+  the same fall back to simpler keys under 3 days.
+- A trip from the car's place to a place B is likely when it starts on at
+  least `min_sure` (default 0.5) of the pool days. `sure` is that share.
+- `start` and `end` are the window: the 25th and 75th percentile of the
+  trip's first start time on those days, in local time. The first window
+  that has not ended wins.
+- `way` is the trip's usual way as above, or `null` when it is not found.
+- Journeys marked "not me" do not count. With no likely trip, or before the
+  first forecast, `found` is `false` and the other fields are `null`.
+
 ## Health series
 
 For the trend charts on the car app's Health tab

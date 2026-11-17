@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from zoneinfo import ZoneInfo
 
 from conftest import SPEC, TOKEN, CheckedClient
@@ -379,3 +380,47 @@ def test_heating_compare(data_dir):
     assert got[0]["battery_kwh"] is None and got[1]["preheat_kwh"] == 2.0
     assert len(c.get("/heating/compare?days=120").json()) == 2
     assert c.get("/heating/compare?days=120").json()[0]["count"] == 6
+
+
+def test_usual_way(data_dir):
+    rows = []
+    c = CheckedClient(create_app(places.store_path(data_dir), TOKEN, UTC, way_rows=lambda: rows))
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    a = c.post("/places", json=LAKE).json()["id"]
+    b = c.post("/places", json={**LAKE, "name": "Test B", "lat": 0.8}).json()["id"]
+    fixes = [(k * 1000, 0.7 + k * 0.001, -0.2) for k in range(101)]
+    rows += [{"start": d * 86_400_000, "from": a, "to": b, "fixes": fixes} for d in range(3)]
+    w = c.get("/usual-way", params={"from": a, "to": b}).json()
+    assert w["found"] and (w["from"], w["to"], w["support"], w["share"]) == (a, b, 3, 1.0)
+    assert w["line"]["coordinates"] == [[-0.2, 0.7], [-0.2, 0.8]]
+    w = c.get("/usual-way", params={"from": a, "to": b, "min_journeys": 4}).json()
+    assert not w["found"] and w["line"] is None
+    r = c.get("/usual-way", params={"from": a, "to": "nope"})
+    assert r.status_code == 404 and r.json() == {"detail": "no such place: nope"}
+
+
+def test_next_trip(data_dir):
+    rows, rhythm = [], {"value": None}
+    app = create_app(
+        places.store_path(data_dir),
+        TOKEN,
+        UTC,
+        way_rows=lambda: rows,
+        rhythm=lambda: rhythm["value"],
+    )
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    t = c.get("/next-trip").json()
+    assert t["found"] is False and t["from"] is None and t["way"] is None
+    # A made-up trip every day at 23:59 UTC, for 10 days up to yesterday.
+    now = int(time.time() * 1000)
+    today = now - now % 86_400_000
+    fixes = [(k * 1000, 0.1 + k * 0.001, 0.2) for k in range(101)]
+    for d in range(1, 11):
+        go = {"start": today - d * 86_400_000 + 86_340_000, "fixes": fixes, "not_me": False}
+        rows += [go | {"from": "a", "to": "a"}]
+    rhythm["value"] = {"hols": set(), "ranges": (), "picks": {"workday": (), "off": ()}}
+    t = c.get("/next-trip").json()
+    assert t["found"] and (t["from"], t["to"], t["sure"]) == ("a", "a", 1.0)
+    assert t["start"].endswith("23:59:00+00:00") and t["way"]["support"] == 10
+    assert c.get("/next-trip", params={"min_sure": 2}).status_code == 422

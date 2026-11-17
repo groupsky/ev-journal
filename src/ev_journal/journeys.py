@@ -233,6 +233,7 @@ class Result:
     forecast_effects: dict = field(default_factory=dict)  # forecast.plan: keys, rows, table
     advice: dict | None = None  # tomorrow's forecast and charging advice
     advice_ctx: dict | None = None  # forecast.plan: what forecast.on_request needs
+    rhythm: dict | None = None  # forecast.plan: hols, ranges, picks for ways.next_trip
     preheats: list = field(default_factory=list)  # heating.Preheat, oldest first
     heating_rows: list = field(default_factory=list)  # heating.journey_rows
 

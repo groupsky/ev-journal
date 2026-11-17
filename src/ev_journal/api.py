@@ -25,7 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ev_journal import charges, forecast, heating, tyres, upkeep
+from ev_journal import charges, forecast, heating, tyres, upkeep, ways
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
@@ -236,6 +236,33 @@ class HeatingGroup(BaseModel):
     kwh_per_100km: float | None = Field(
         None, description="Journey battery kWh per 100 km. Null under 3 journeys."
     )
+
+
+class UsualWay(BaseModel):
+    from_: str = Field(alias="from", description="Place id where the way starts.")
+    to: str = Field(description="Place id where the way ends.")
+    found: bool = Field(description="false: no way has enough journeys; line is null.")
+    journeys: int = Field(description="Journeys from `from` to `to` with a GPS track.")
+    support: int = Field(description="Journeys that took the most driven way.")
+    share: float = Field(description="support / journeys, 0..1.")
+    first: str | None = Field(description="Local date of the first journey of the way.")
+    last: str | None = Field(description="Local date of the last journey of the way.")
+    line: dict | None = Field(
+        description="GeoJSON LineString, [lon, lat] pairs, simplified to about 20 m."
+    )
+
+
+class NextTrip(BaseModel):
+    found: bool = Field(description="false: no likely trip in the next 7 days; all else null.")
+    from_: str | None = Field(alias="from", description="Place id: where the car is now.")
+    to: str | None = Field(description="Place id.")
+    day: str | None = Field(description="Local date of the trip.")
+    day_type: str | None = Field(description="workday, weekend, holiday or a named range.")
+    start: str | None = Field(description="Window start: 25th percentile of past departures.")
+    end: str | None = Field(description="Window end: 75th percentile of past departures.")
+    sure: float | None = Field(description="Share of the pool days with this trip, 0..1.")
+    pool_days: int = Field(description="Past days of the same calendar rhythm.")
+    way: UsualWay | None = Field(description="The usual way of the trip, if found.")
 
 
 class TrackPoint(BaseModel):
@@ -522,6 +549,8 @@ def create_app(
     health_daily: Callable[[date, date], list[dict]] = lambda _a, _b: [],
     health_fan: Callable[[int], list[dict]] = lambda _n: [],
     heating_rows: Callable[[], list[dict]] = list,
+    way_rows: Callable[[], list[dict]] = list,
+    rhythm: Callable[[], dict | None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -532,7 +561,9 @@ def create_app(
     km_now gives the last odometer reading (t, km), or None. temps gives one
     mean outside temperature per day with a reading, oldest first.
     health_daily and health_fan give the health series (#49). heating_rows
-    gives the commute journeys of the last recompute (heating.journey_rows)."""
+    gives the commute journeys of the last recompute (heating.journey_rows).
+    way_rows gives the journeys with their place ids and fixes (ways.usual_way),
+    rhythm the calendar rhythm of the last forecast (ways.next_trip)."""
     tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
@@ -961,6 +992,30 @@ def create_app(
         if pts is None:
             raise Fail(404, "no such journey")
         return pts
+
+    @r.get("/usual-way", response_model=UsualWay, responses=nf)
+    def get_usual_way(
+        from_: str = Query(alias="from", description="Place id."),
+        to: str = Query(description="Place id."),
+        min_journeys: int = Query(ways.MIN_JOURNEYS, ge=1),
+        min_share: float = Query(ways.MIN_SHARE, ge=0, le=1),
+        conn=Depends(db),
+    ):
+        """The path most often driven from one place to another, learned from
+        the journey tracks. found is false when no way has min_journeys
+        journeys and min_share of them."""
+        for pid in (from_, to):
+            row = conn.execute("SELECT 1 FROM places WHERE id = ? AND deleted = 0", (pid,))
+            if row.fetchone() is None:
+                raise Fail(404, f"no such place: {pid}")
+        return ways.usual_way(way_rows(), from_, to, tz, min_journeys, min_share)
+
+    @r.get("/next-trip", response_model=NextTrip)
+    def get_next_trip(min_sure: float = Query(ways.MIN_SURE, ge=0, le=1)):
+        """The next likely departure from where the car is now, from the
+        calendar rhythm the forecast finds, with its usual way. found is
+        false when no trip starts on min_sure of the matching past days."""
+        return ways.next_trip(way_rows(), rhythm(), tz, store.now_ms(), min_sure)
 
     @r.get("/health/daily", response_model=list[HealthDay])
     def get_health_daily(
