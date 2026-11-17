@@ -16,7 +16,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -466,6 +466,20 @@ def road_due(s: Settings, state: dict, now: int) -> int | None:
     return roadcheck.due_at(trip, s.road_lead_min)
 
 
+def quota_now(last: tuple[int, int] | None, now: int) -> int | None:
+    """The last Xweather quota (left, read at ms), if read in this UTC
+    month: the quota period is a month, so an older reading must not block
+    the check."""
+    if last is None:
+        return None
+    left, at = last
+
+    def month(ms: int) -> str:
+        return datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m")
+
+    return left if month(at) == month(now) else None
+
+
 def road_check(s: Settings, state: dict, now: int, fetch=roadcheck.urllib_fetch) -> dict:
     """Check the road weather for state["road_trip"], keep it for the API
     and publish it on MQTT. Marks the trip as checked, also on a failure."""
@@ -481,10 +495,11 @@ def road_check(s: Settings, state: dict, now: int, fetch=roadcheck.urllib_fetch)
         ZoneInfo(s.tz),
         s.road_kmh,
         s.road_reserve,
-        state["road_quota"],
+        quota_now(state["road_quota"], now),
         s.road_rules,
     )
-    state["road_quota"] = out["quota_left"]
+    if out["quota_left"] is not None and out["skipped"] != "quota":
+        state["road_quota"] = (out["quota_left"], now)
     out = {"trip": {k: trip[k] for k in ("from", "to", "start", "end")}} | out
     state["road_check"] = out
     if s.mqtt_url:

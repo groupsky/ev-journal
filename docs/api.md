@@ -181,7 +181,10 @@ No check when no trip is likely or the trip has no usual way.
   `X-RateLimit-Remaining-Period`. The check is skipped (`skipped: "quota"`)
   when the last known value minus the points is under `EVJ_ROAD_RESERVE`;
   the detail call is skipped (`skipped: "detail: quota"`) when it would go
-  under it.
+  under it. The last value counts only in the same UTC month: the quota
+  period is a month.
+- When the Open-Meteo call fails, the road data is kept, the points without
+  it are left out, and `skipped` is `"estimate"`.
 - The key is never in the logs or the output.
 
 `GET /road-check` gives the last result, `404` before the first:

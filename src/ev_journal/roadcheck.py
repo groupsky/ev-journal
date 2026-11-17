@@ -7,6 +7,7 @@ that are not GREEN, by km from the start. No place or road names.
 """
 
 import json
+import sys
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
@@ -128,10 +129,18 @@ def _mins(t_ms: float, now_ms: int) -> int:
 
 
 def _by_id(data: object) -> dict[str, dict]:
-    if not isinstance(data, dict) or not data.get("success", True):
+    """Route features by the id sent: the feature id, else the request id,
+    else the position (the answer keeps the order of the points). A route
+    where no point has road data may have success false: still a list."""
+    feats = data.get("response") if isinstance(data, dict) else None
+    if not isinstance(feats, list):
         err = data.get("error") if isinstance(data, dict) else None
         raise RuntimeError(f"Xweather error: {err}")
-    return {str(f.get("id")): f for f in data.get("response") or []}
+    out = {}
+    for k, f in enumerate(feats):
+        fid = f.get("id") or ((f.get("properties") or {}).get("request") or {}).get("id")
+        out[str(k if fid is None else fid)] = f
+    return out
 
 
 def estimate(hourly: dict, at_s: float, rules: Rules) -> tuple[str, list[str]]:
@@ -238,9 +247,19 @@ def check(
     source = ["road" if lv is not None else "estimate" for lv in levels]
     none = [i for i, lv in enumerate(levels) if lv is None]
     if none:
-        for i, hourly in zip(none, _meteo(client, [pts[i] for i in none], rules), strict=True):
-            lv, what[i] = estimate(hourly.get("hourly") or {}, times[i] / 1000, rules)
-            levels[i] = LEVELS.index(lv)
+        try:
+            answers = _meteo(client, [pts[i] for i in none], rules)
+            if len(answers) != len(none):
+                raise RuntimeError(f"Open-Meteo: {len(answers)} answers for {len(none)} points")
+        except Exception as e:  # keep the road data already paid for
+            print(f"ev-journal: road check estimate failed: {e!r}", file=sys.stderr)
+            out["skipped"] = "estimate"
+            for i in none:
+                source[i] = "none"
+        else:
+            for i, hourly in zip(none, answers, strict=True):
+                lv, what[i] = estimate(hourly.get("hourly") or {}, times[i] / 1000, rules)
+                levels[i] = LEVELS.index(lv)
     out["road_points"] = source.count("road")
     out["estimate_points"] = source.count("estimate")
     for i, lv in enumerate(levels):
@@ -254,7 +273,7 @@ def check(
                     "source": source[i],
                 }
             )
-    out["level"] = LEVELS[max(levels, default=0)]
+    out["level"] = LEVELS[max((lv for lv in levels if lv is not None), default=0)]
     return out
 
 

@@ -231,7 +231,7 @@ def test_the_check_runs_the_lead_time_before_a_likely_trip(tmp_path, monkeypatch
     fake.answers.append(({}, [meteo(8.0, 2.0, 0.0, 9000)] * 6))
     out = cli.road_check(s, state, due, fake)
     assert out["trip"]["from"] == "a" and out["for"] == "2026-01-12T08:00+00:00"
-    assert out["level"] == "GREEN" and state["road_quota"] == 5000
+    assert out["level"] == "GREEN" and state["road_quota"] == (5000, due)
     assert sent == [(mqtt.ROAD_TOPIC, out)] and state["road_check"] is out
     assert cli.road_due(s, state, due + 60_000) is None  # once per trip
     assert (
@@ -276,3 +276,35 @@ def test_road_check_api(data_dir):
         "at": None,
         "source": "road",
     }
+
+
+def test_a_low_quota_from_last_month_does_not_block():
+    from ev_journal import __main__ as cli
+
+    assert cli.quota_now((900, T0), T0 + DAY) == 900
+    assert cli.quota_now((900, T0 - 20 * DAY), T0) is None  # read in December
+    assert cli.quota_now(None, T0) is None
+
+
+def test_a_failed_estimate_keeps_the_road_data(capsys):
+    def flaky(url, body=None):
+        if url.startswith(rc.OPEN_METEO):
+            raise OSError("429")
+        feats = [road(str(i), None if i == 0 else 2 if i == 1 else 0) for i in range(6)]
+        return {}, {"success": True, "response": feats}
+
+    out = rc.check(LINE, START, NOW, client(flaky), UTC, quota_left=None, reserve=0)
+    assert out["level"] == "RED" and out["skipped"] == "estimate"
+    assert out["road_points"] == 5 and out["estimate_points"] == 0
+    assert "estimate failed" in capsys.readouterr().err
+
+
+def test_points_match_by_request_id_or_order():
+    feats = [road(str(i), 2 if i == 2 else 0) for i in range(6)]
+    for f in feats:
+        del f["id"]
+    by_req = rc._by_id({"success": True, "response": feats})
+    assert list(by_req) == [str(i) for i in range(6)]
+    for f in feats:
+        del f["properties"]["request"]["id"]
+    assert list(rc._by_id({"success": False, "response": feats})) == [str(i) for i in range(6)]

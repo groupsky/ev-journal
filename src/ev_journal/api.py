@@ -286,7 +286,8 @@ class RoadCheck(BaseModel):
     items: list[RoadItem] = Field(description="The points that are not GREEN, by km.")
     skipped: str | None = Field(
         description="quota: no check, the quota is under the reserve; detail: quota: "
-        "the surface details were not asked."
+        "the surface details were not asked; estimate: the Open-Meteo call failed, "
+        "the points without road data are left out."
     )
     quota_left: int | None = Field(description="Xweather accesses left this period.")
 
