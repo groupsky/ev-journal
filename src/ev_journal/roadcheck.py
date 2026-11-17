@@ -253,7 +253,7 @@ def check(
                 raise RuntimeError(f"Open-Meteo: {len(answers)} answers for {len(none)} points")
         except Exception as e:  # keep the road data already paid for
             print(f"ev-journal: road check estimate failed: {e!r}", file=sys.stderr)
-            out["skipped"] = "estimate"
+            out["skipped"] = "; ".join(r for r in (out["skipped"], "estimate") if r)
             for i in none:
                 source[i] = "none"
         else:
@@ -273,7 +273,8 @@ def check(
                     "source": source[i],
                 }
             )
-    out["level"] = LEVELS[max((lv for lv in levels if lv is not None), default=0)]
+    known = [lv for lv in levels if lv is not None]
+    out["level"] = LEVELS[max(known)] if known else None  # nothing known: not GREEN
     return out
 
 

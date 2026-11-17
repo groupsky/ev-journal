@@ -184,7 +184,8 @@ No check when no trip is likely or the trip has no usual way.
   under it. The last value counts only in the same UTC month: the quota
   period is a month.
 - When the Open-Meteo call fails, the road data is kept, the points without
-  it are left out, and `skipped` is `"estimate"`.
+  it are left out, and `skipped` has `"estimate"` (reasons are joined by
+  `; `). With no point known at all, `level` is `null`.
 - The key is never in the logs or the output.
 
 `GET /road-check` gives the last result, `404` before the first:

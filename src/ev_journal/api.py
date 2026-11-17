@@ -279,7 +279,9 @@ class RoadCheck(BaseModel):
     trip: dict = Field(description="from, to (place ids), start and end of the trip window.")
     checked_at: str = Field(description="Local time of the check.")
     for_: str = Field(alias="for", description="The trip start the check is for.")
-    level: str | None = Field(description="Worst level: GREEN, YELLOW or RED. Null: skipped.")
+    level: str | None = Field(
+        description="Worst level: GREEN, YELLOW or RED. Null: skipped, or no point known."
+    )
     points: int = Field(description="Points along the way, 1 km apart.")
     road_points: int = Field(description="Points with Xweather road data.")
     estimate_points: int = Field(description="Points with the Open-Meteo estimate.")
@@ -287,7 +289,7 @@ class RoadCheck(BaseModel):
     skipped: str | None = Field(
         description="quota: no check, the quota is under the reserve; detail: quota: "
         "the surface details were not asked; estimate: the Open-Meteo call failed, "
-        "the points without road data are left out."
+        "the points without road data are left out. Several reasons are joined by '; '."
     )
     quota_left: int | None = Field(description="Xweather accesses left this period.")
 

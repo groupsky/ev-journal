@@ -1315,7 +1315,7 @@
                 "type": "null"
               }
             ],
-            "description": "Worst level: GREEN, YELLOW or RED. Null: skipped.",
+            "description": "Worst level: GREEN, YELLOW or RED. Null: skipped, or no point known.",
             "title": "Level"
           },
           "points": {
@@ -1349,7 +1349,7 @@
                 "type": "null"
               }
             ],
-            "description": "quota: no check, the quota is under the reserve; detail: quota: the surface details were not asked; estimate: the Open-Meteo call failed, the points without road data are left out.",
+            "description": "quota: no check, the quota is under the reserve; detail: quota: the surface details were not asked; estimate: the Open-Meteo call failed, the points without road data are left out. Several reasons are joined by '; '.",
             "title": "Skipped"
           },
           "trip": {

@@ -308,3 +308,13 @@ def test_points_match_by_request_id_or_order():
     for f in feats:
         del f["properties"]["request"]["id"]
     assert list(rc._by_id({"success": False, "response": feats})) == [str(i) for i in range(6)]
+
+
+def test_nothing_known_is_not_green():
+    def flaky(url, body=None):
+        if url.startswith(rc.OPEN_METEO):
+            raise OSError("429")
+        return {}, {"success": False, "response": [road(str(i), None) for i in range(6)]}
+
+    out = rc.check(LINE, START, NOW, client(flaky), UTC)
+    assert out["level"] is None and out["skipped"] == "estimate" and out["items"] == []
