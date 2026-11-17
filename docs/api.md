@@ -160,6 +160,47 @@ one place to another, learned from the journey tracks of the last recompute.
 - Journeys marked "not me" do not count. With no likely trip, or before the
   first forecast, `found` is `false` and the other fields are `null`.
 
+## Road check
+
+When the Xweather key is set, the loop checks the road weather along the
+usual way of the next likely trip (`GET /next-trip`), `EVJ_ROAD_LEAD_MIN`
+before its window starts. Once per trip; a failed check is not tried again.
+No check when no trip is likely or the trip has no usual way.
+
+- Points along the way, 1 km apart. The car passes each one at the window
+  start plus its km at `EVJ_ROAD_KMH`.
+- Xweather road weather summary (1 access per point) first, for the time
+  the car passes. Only for the points that are not GREEN, the surface
+  conditions (5 accesses per point), which give `what`. `mindist` is always
+  sent, so Xweather does not skip close points.
+- Where Xweather has no road data, a free Open-Meteo estimate with the
+  `EVJ_ROAD_*` rules of the README: ice from the air temperature,
+  precipitation and dew point; fog from the visibility. The car app uses the
+  same first rules: keep them in step when one side changes.
+- Quota: the account is shared with the car app. Each Xweather answer gives
+  `X-RateLimit-Remaining-Period`. The check is skipped (`skipped: "quota"`)
+  when the last known value minus the points is under `EVJ_ROAD_RESERVE`;
+  the detail call is skipped (`skipped: "detail: quota"`) when it would go
+  under it.
+- The key is never in the logs or the output.
+
+`GET /road-check` gives the last result, `404` before the first:
+
+```json
+{"trip": {"from": "p-home", "to": "p-work", "start": "2026-01-12T08:00:00+00:00", "end": "2026-01-12T08:15:00+00:00"},
+ "checked_at": "2026-01-12T07:15+00:00", "for": "2026-01-12T08:00+00:00",
+ "level": "YELLOW", "points": 6, "road_points": 4, "estimate_points": 2,
+ "items": [{"km": 3.0, "level": "YELLOW", "what": ["wet"], "at": "2026-01-12T08:04+00:00", "source": "road"}],
+ "skipped": null, "quota_left": 8990}
+```
+
+- `level` is the worst along the way, `null` when skipped. `items` are the
+  points that are not GREEN, by km from the start; no place or road names.
+- `source` is `road` (Xweather road data) or `estimate` (Open-Meteo).
+
+The same JSON is published on MQTT, topic `homy/ioniq/road_check`,
+retained. The notice to a person is sent by the relay in homy.
+
 ## Health series
 
 For the trend charts on the car app's Health tab
