@@ -379,3 +379,20 @@ def test_heating_compare(data_dir):
     assert got[0]["battery_kwh"] is None and got[1]["preheat_kwh"] == 2.0
     assert len(c.get("/heating/compare?days=120").json()) == 2
     assert c.get("/heating/compare?days=120").json()[0]["count"] == 6
+
+
+def test_usual_way(data_dir):
+    rows = []
+    c = CheckedClient(create_app(places.store_path(data_dir), TOKEN, UTC, way_rows=lambda: rows))
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    a = c.post("/places", json=LAKE).json()["id"]
+    b = c.post("/places", json={**LAKE, "name": "Test B", "lat": 0.8}).json()["id"]
+    fixes = [(k * 1000, 0.7 + k * 0.001, -0.2) for k in range(101)]
+    rows += [{"start": d * 86_400_000, "from": a, "to": b, "fixes": fixes} for d in range(3)]
+    w = c.get("/usual-way", params={"from": a, "to": b}).json()
+    assert w["found"] and (w["from"], w["to"], w["support"], w["share"]) == (a, b, 3, 1.0)
+    assert w["line"]["coordinates"] == [[-0.2, 0.7], [-0.2, 0.8]]
+    w = c.get("/usual-way", params={"from": a, "to": b, "min_journeys": 4}).json()
+    assert not w["found"] and w["line"] is None
+    r = c.get("/usual-way", params={"from": a, "to": "nope"})
+    assert r.status_code == 404 and r.json() == {"detail": "no such place: nope"}

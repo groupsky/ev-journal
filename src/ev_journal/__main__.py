@@ -426,6 +426,20 @@ def journey_fixes(r: Result) -> dict[int, tuple[int, int, list]]:
     return {j.id: (j.start, j.end, [f for t in j.trips for f in t.fixes]) for j in r.journeys}
 
 
+def way_rows(r: Result) -> list[dict]:
+    """The journeys for the usual way and the next trip (#54)."""
+    return [
+        {
+            "start": j.start,
+            "from": j.start_place.id if j.start_place else None,
+            "to": j.end_place.id if j.end_place else None,
+            "fixes": [f for t in j.trips for f in t.fixes],
+            "not_me": j.not_me,
+        }
+        for j in r.journeys
+    ]
+
+
 def journey_track(s: Settings, fixes: dict, journey_id: int) -> list[dict] | None:
     """The map points of one journey, with the energy counters read now."""
     if journey_id not in fixes:
@@ -466,6 +480,7 @@ def serve_api(s: Settings, state: dict) -> None:
         health_series.daily,
         health_series.fan,
         lambda: state["heating_rows"],
+        lambda: state["way_rows"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -698,6 +713,7 @@ def main() -> None:
             "fixes": {},
             "journey_items": [],
             "heating_rows": [],
+            "way_rows": [],
         }
         if s.api_token:
             serve_api(s, state)
@@ -726,6 +742,7 @@ def main() -> None:
                 state["fixes"] = journey_fixes(r)
                 state["journey_items"] = [outputs.journey_item(j) for j in r.journeys]
                 state["heating_rows"] = r.heating_rows
+                state["way_rows"] = way_rows(r)
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
     else:

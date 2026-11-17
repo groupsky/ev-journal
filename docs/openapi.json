@@ -2151,6 +2151,90 @@
         "title": "UpkeepLog",
         "type": "object"
       },
+      "UsualWay": {
+        "properties": {
+          "first": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local date of the first journey of the way.",
+            "title": "First"
+          },
+          "found": {
+            "description": "false: no way has enough journeys; line is null.",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "from": {
+            "description": "Place id where the way starts.",
+            "title": "From",
+            "type": "string"
+          },
+          "journeys": {
+            "description": "Journeys from `from` to `to` with a GPS track.",
+            "title": "Journeys",
+            "type": "integer"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local date of the last journey of the way.",
+            "title": "Last"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GeoJSON LineString, [lon, lat] pairs, simplified to about 20 m.",
+            "title": "Line"
+          },
+          "share": {
+            "description": "support / journeys, 0..1.",
+            "title": "Share",
+            "type": "number"
+          },
+          "support": {
+            "description": "Journeys that took the most driven way.",
+            "title": "Support",
+            "type": "integer"
+          },
+          "to": {
+            "description": "Place id where the way ends.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "found",
+          "journeys",
+          "support",
+          "share",
+          "first",
+          "last",
+          "line"
+        ],
+        "title": "UsualWay",
+        "type": "object"
+      },
       "Written": {
         "properties": {
           "id": {
@@ -4647,6 +4731,102 @@
           }
         },
         "summary": "Upkeep Log"
+      }
+    },
+    "/usual-way": {
+      "get": {
+        "description": "The path most often driven from one place to another, learned from\nthe journey tracks. found is false when no way has min_journeys\njourneys and min_share of them.",
+        "operationId": "get_usual_way_usual_way_get",
+        "parameters": [
+          {
+            "description": "Place id.",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "Place id.",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Place id.",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Place id.",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_journeys",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "minimum": 1,
+              "title": "Min Journeys",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_share",
+            "required": false,
+            "schema": {
+              "default": 0.5,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Share",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsualWay"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Usual Way"
       }
     }
   }
