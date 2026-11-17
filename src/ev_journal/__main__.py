@@ -481,6 +481,7 @@ def serve_api(s: Settings, state: dict) -> None:
         health_series.fan,
         lambda: state["heating_rows"],
         lambda: state["way_rows"],
+        lambda: state["rhythm"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -714,6 +715,7 @@ def main() -> None:
             "journey_items": [],
             "heating_rows": [],
             "way_rows": [],
+            "rhythm": None,
         }
         if s.api_token:
             serve_api(s, state)
@@ -743,6 +745,7 @@ def main() -> None:
                 state["journey_items"] = [outputs.journey_item(j) for j in r.journeys]
                 state["heating_rows"] = r.heating_rows
                 state["way_rows"] = way_rows(r)
+                state["rhythm"] = r.rhythm
             except Exception as e:  # keep the loop alive; the next run recomputes all
                 print(f"ev-journal: run failed: {e!r}", file=sys.stderr)
     else:

@@ -845,6 +845,129 @@
         "title": "LabelIn",
         "type": "object"
       },
+      "NextTrip": {
+        "properties": {
+          "day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local date of the trip.",
+            "title": "Day"
+          },
+          "day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "workday, weekend, holiday or a named range.",
+            "title": "Day Type"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Window end: 75th percentile of past departures.",
+            "title": "End"
+          },
+          "found": {
+            "description": "false: no likely trip in the next 7 days; all else null.",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Place id: where the car is now.",
+            "title": "From"
+          },
+          "pool_days": {
+            "description": "Past days of the same calendar rhythm.",
+            "title": "Pool Days",
+            "type": "integer"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Window start: 25th percentile of past departures.",
+            "title": "Start"
+          },
+          "sure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of the pool days with this trip, 0..1.",
+            "title": "Sure"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Place id.",
+            "title": "To"
+          },
+          "way": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsualWay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The usual way of the trip, if found."
+          }
+        },
+        "required": [
+          "found",
+          "from",
+          "to",
+          "day",
+          "day_type",
+          "start",
+          "end",
+          "sure",
+          "pool_days",
+          "way"
+        ],
+        "title": "NextTrip",
+        "type": "object"
+      },
       "Place": {
         "properties": {
           "aliases": {
@@ -3176,6 +3299,59 @@
           }
         },
         "summary": "Get Track"
+      }
+    },
+    "/next-trip": {
+      "get": {
+        "description": "The next likely departure from where the car is now, from the\ncalendar rhythm the forecast finds, with its usual way. found is\nfalse when no trip starts on min_sure of the matching past days.",
+        "operationId": "get_next_trip_next_trip_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_sure",
+            "required": false,
+            "schema": {
+              "default": 0.5,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Sure",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextTrip"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Next Trip"
       }
     },
     "/places": {

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from zoneinfo import ZoneInfo
 
 from conftest import SPEC, TOKEN, CheckedClient
@@ -396,3 +397,30 @@ def test_usual_way(data_dir):
     assert not w["found"] and w["line"] is None
     r = c.get("/usual-way", params={"from": a, "to": "nope"})
     assert r.status_code == 404 and r.json() == {"detail": "no such place: nope"}
+
+
+def test_next_trip(data_dir):
+    rows, rhythm = [], {"value": None}
+    app = create_app(
+        places.store_path(data_dir),
+        TOKEN,
+        UTC,
+        way_rows=lambda: rows,
+        rhythm=lambda: rhythm["value"],
+    )
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    t = c.get("/next-trip").json()
+    assert t["found"] is False and t["from"] is None and t["way"] is None
+    # A made-up trip every day at 23:59 UTC, for 10 days up to yesterday.
+    now = int(time.time() * 1000)
+    today = now - now % 86_400_000
+    fixes = [(k * 1000, 0.1 + k * 0.001, 0.2) for k in range(101)]
+    for d in range(1, 11):
+        go = {"start": today - d * 86_400_000 + 86_340_000, "fixes": fixes, "not_me": False}
+        rows += [go | {"from": "a", "to": "a"}]
+    rhythm["value"] = {"hols": set(), "ranges": (), "picks": {"workday": (), "off": ()}}
+    t = c.get("/next-trip").json()
+    assert t["found"] and (t["from"], t["to"], t["sure"]) == ("a", "a", 1.0)
+    assert t["start"].endswith("23:59:00+00:00") and t["way"]["support"] == 10
+    assert c.get("/next-trip", params={"min_sure": 2}).status_code == 422
