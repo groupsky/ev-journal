@@ -113,3 +113,4 @@ def test_no_next_trip():
     rare = [r for r in commute() if r["start"] % (3 * DAY) < DAY]  # about a third of the days
     t = ways.next_trip(rare, RHYTHM, UTC, now)
     assert not t["found"] and t["start"] is None and t["way"] is None
+    assert ways.next_trip(rare, RHYTHM, UTC, now, min_sure=0)["found"]  # no empty window

@@ -22,6 +22,7 @@ SAME_SHARE = 0.9  # this share of points of each track on the other: the same wa
 SIMPLIFY_M = 20.0
 MIN_SURE = 0.5  # a next trip needs a departure on this share of the pool days
 DAYS_AHEAD = 7
+MAX_JOURNEYS = 100  # only the newest journeys from A to B count
 STEP_M = 50.0  # tracks are compared at one point per this many metres
 
 
@@ -90,10 +91,13 @@ def usual_way(
     min_share: float = MIN_SHARE,
 ) -> dict:
     """rows: journeys as {"start": ms, "from": place id, "to": place id,
-    "fixes": [(t, lat, lon)]}. Journeys without fixes do not count.
+    "fixes": [(t, lat, lon)]}. Journeys without fixes do not count, and
+    only the newest MAX_JOURNEYS do. Journeys marked "not me" count: the car
+    still took that way.
 
     Returns the way with its support, or found False and no line."""
     js = [r for r in rows if r["from"] == from_id and r["to"] == to_id and len(r["fixes"]) > 1]
+    js = sorted(js, key=lambda r: r["start"])[-MAX_JOURNEYS:]  # pairs grow as n squared
     out = {"from": from_id, "to": to_id, "journeys": len(js), "found": False}
     out |= {"support": 0, "share": 0.0, "first": None, "last": None, "line": None}
     if not js:
@@ -181,7 +185,7 @@ def next_trip(
         for (frm, to), by_day in starts.items():
             mins = [by_day[d] for d in pool if d in by_day]
             sure = len(mins) / len(pool) if pool else 0.0
-            if sure < min_sure:
+            if not mins or sure < min_sure:
                 continue
             midnight = datetime.combine(day, datetime.min.time(), tz)
             t0, t1 = (midnight + timedelta(minutes=quantile(mins, q)) for q in (0.25, 0.75))

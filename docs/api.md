@@ -129,7 +129,9 @@ points `{"t", "lat", "lon", "kwh_per_100km"}`, in time order:
 one place to another, learned from the journey tracks of the last recompute.
 
 - A journey counts when it starts at `from` and ends at `to` (place ids of
-  `GET /places`) and has real GPS fixes. `journeys` is how many there are.
+  `GET /places`) and has real GPS fixes, up to the newest 100. `journeys` is
+  how many there are. Journeys marked "not me" count too: the car took that
+  way.
 - Two tracks take the same way when 90 % or more of the points of each (one
   per 50 m) lie within about 150 m of the other. The way with the most
   journeys wins; on a tie, the way of the newest journey.
