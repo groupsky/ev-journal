@@ -1281,6 +1281,140 @@
         "title": "ReceiptIn",
         "type": "object"
       },
+      "RoadCheck": {
+        "properties": {
+          "checked_at": {
+            "description": "Local time of the check.",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "estimate_points": {
+            "description": "Points with the Open-Meteo estimate.",
+            "title": "Estimate Points",
+            "type": "integer"
+          },
+          "for": {
+            "description": "The trip start the check is for.",
+            "title": "For",
+            "type": "string"
+          },
+          "items": {
+            "description": "The points that are not GREEN, by km.",
+            "items": {
+              "$ref": "#/components/schemas/RoadItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worst level: GREEN, YELLOW or RED. Null: skipped, or no point known.",
+            "title": "Level"
+          },
+          "points": {
+            "description": "Points along the way, 1 km apart.",
+            "title": "Points",
+            "type": "integer"
+          },
+          "quota_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Xweather accesses left this period.",
+            "title": "Quota Left"
+          },
+          "road_points": {
+            "description": "Points with Xweather road data.",
+            "title": "Road Points",
+            "type": "integer"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "quota: no check, the quota is under the reserve; detail: quota: the surface details were not asked; estimate: the Open-Meteo call failed, the points without road data are left out. Several reasons are joined by '; '.",
+            "title": "Skipped"
+          },
+          "trip": {
+            "additionalProperties": true,
+            "description": "from, to (place ids), start and end of the trip window.",
+            "title": "Trip",
+            "type": "object"
+          }
+        },
+        "required": [
+          "trip",
+          "checked_at",
+          "for",
+          "level",
+          "points",
+          "road_points",
+          "estimate_points",
+          "items",
+          "skipped",
+          "quota_left"
+        ],
+        "title": "RoadCheck",
+        "type": "object"
+      },
+      "RoadItem": {
+        "properties": {
+          "at": {
+            "description": "When the car would pass, local time.",
+            "title": "At",
+            "type": "string"
+          },
+          "km": {
+            "description": "Km from the start of the usual way.",
+            "title": "Km",
+            "type": "number"
+          },
+          "level": {
+            "description": "YELLOW or RED.",
+            "title": "Level",
+            "type": "string"
+          },
+          "source": {
+            "description": "road (Xweather road data) or estimate (Open-Meteo).",
+            "title": "Source",
+            "type": "string"
+          },
+          "what": {
+            "description": "Road data: the surface (ice, snow, slush, wet, ...); estimate: ice, fog.",
+            "items": {
+              "type": "string"
+            },
+            "title": "What",
+            "type": "array"
+          }
+        },
+        "required": [
+          "km",
+          "level",
+          "what",
+          "at",
+          "source"
+        ],
+        "title": "RoadItem",
+        "type": "object"
+      },
       "Route": {
         "properties": {
           "id": {
@@ -3818,6 +3952,55 @@
           }
         },
         "summary": "Answer"
+      }
+    },
+    "/road-check": {
+      "get": {
+        "description": "The last road check before a likely trip: the worst level along\nthe usual way and the points that are not GREEN. 404 before the\nfirst check.",
+        "operationId": "get_road_check_road_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoadCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Road Check"
       }
     },
     "/routes": {

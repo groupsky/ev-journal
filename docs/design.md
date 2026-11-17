@@ -194,6 +194,7 @@ driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
   - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, the upkeep items that are due, and the tyre set on now with its hint) for a Home Assistant view in homy.
   - Notices on MQTT (not retained), for example the evening plug check; homy sends them on to a person ([outputs.md](outputs.md#notices)).
   - The home place on MQTT (retained), so homy can tell when the car leaves home ([outputs.md](outputs.md#home-place)).
+  - The road check before the next likely trip on MQTT (retained): Xweather road weather along the usual way, an Open-Meteo estimate where it has no road data ([api.md](api.md#road-check)).
 
 ## Later
 

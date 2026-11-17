@@ -9,6 +9,7 @@ import paho.mqtt.client as mqtt
 TOPIC = "homy/ioniq/journeys"
 NOTICE_TOPIC = "homy/ioniq/notice"
 HOME_TOPIC = "homy/ioniq/home"
+ROAD_TOPIC = "homy/ioniq/road_check"
 
 
 def publish(url: str, payload: dict, topic: str = TOPIC, retain: bool = True) -> None:

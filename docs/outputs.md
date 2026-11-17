@@ -264,6 +264,12 @@ each run, and at once after a place is created, changed or deleted through
 the API. Not published when there is no `home` place (an old retained message
 stays). With several, the first by `id`, and a warning in the log.
 
+### Road check
+
+Topic `homy/ioniq/road_check`, **retained**, QoS 1. The JSON of
+`GET /road-check` ([api.md](api.md#road-check)), published after each road
+check before a likely trip.
+
 ## Places seed
 
 `EVJ_PLACES_FILE` points to a JSON list outside the repo. It is imported once

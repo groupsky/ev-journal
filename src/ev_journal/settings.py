@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import date, time
 from pathlib import Path
 
+from ev_journal.roadcheck import Rules as RoadRules
+
 # Every env name with this prefix is read as a departure of one day type.
 DEPARTURE_PREFIX = "EVJ_DEPARTURE_"
 BASE_DAY_TYPES = ("workday", "weekend", "holiday")
@@ -50,6 +52,12 @@ class Settings:
     tyre_max_age_years: float = 6.0  # (#45)
     tyre_swap_c: float = 7.0
     tyre_swap_days: int = 7
+    xweather_id: str | None = field(default=None, repr=False)  # (#55)
+    xweather_secret: str | None = field(default=None, repr=False)
+    road_lead_min: int = 45
+    road_reserve: int = 1000
+    road_kmh: float = 50.0
+    road_rules: RoadRules = field(default_factory=RoadRules)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -88,6 +96,19 @@ class Settings:
             tyre_max_age_years=float(e.get("EVJ_TYRE_MAX_AGE_YEARS", "6")),
             tyre_swap_c=float(e.get("EVJ_TYRE_SWAP_C", "7")),
             tyre_swap_days=_positive(e, "EVJ_TYRE_SWAP_DAYS", "7"),
+            xweather_id=_read_file(e.get("EVJ_XWEATHER_ID_FILE")),
+            xweather_secret=_read_file(e.get("EVJ_XWEATHER_SECRET_FILE")),
+            road_lead_min=_positive(e, "EVJ_ROAD_LEAD_MIN", "45"),
+            road_reserve=int(e.get("EVJ_ROAD_RESERVE", "1000")),
+            road_kmh=float(e.get("EVJ_ROAD_KMH", "50")),
+            road_rules=RoadRules(
+                ice_yellow_c=float(e.get("EVJ_ROAD_ICE_YELLOW_C", "2")),
+                ice_red_c=float(e.get("EVJ_ROAD_ICE_RED_C", "0")),
+                dew_gap_c=float(e.get("EVJ_ROAD_DEW_GAP_C", "1")),
+                precip_hours=_positive(e, "EVJ_ROAD_PRECIP_HOURS", "6"),
+                fog_yellow_m=float(e.get("EVJ_ROAD_FOG_YELLOW_M", "1000")),
+                fog_red_m=float(e.get("EVJ_ROAD_FOG_RED_M", "200")),
+            ),
         )._checked()
 
     def _checked(self) -> "Settings":
