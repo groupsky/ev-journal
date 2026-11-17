@@ -187,3 +187,92 @@ def test_the_key_never_appears_in_errors_or_output():
     fake = Fake([({}, {"success": True, "response": [road(str(i), 0) for i in range(6)]})])
     out = rc.check(LINE, START, NOW, client(fake), UTC)
     assert SECRET not in repr(out) and KEY_ID not in repr(out)
+
+
+DAY = 86_400_000
+T0 = 1_768_190_400_000  # 2026-01-12T04:00:00Z, a made-up Monday
+
+
+def loop_state() -> dict:
+    """Made-up journeys from a to b at 08:00 UTC and back at 18:00, 14 days."""
+    fixes = [(k * 1000, 0.1 + k * 50 / 111_195, 0.2) for k in range(101)]  # 5 km
+    rows = []
+    for d in range(1, 15):
+        for frm, to, h in (("a", "b", 4), ("b", "a", 14)):
+            go = {"start": T0 - d * DAY + h * 3_600_000, "fixes": fixes, "not_me": False}
+            rows.append(go | {"from": frm, "to": to})
+    rhythm = {"hols": set(), "ranges": (), "picks": {"workday": (), "off": ()}}
+    state = {"way_rows": rows, "rhythm": rhythm}
+    return state | {"road_trip": None, "road_done": None, "road_quota": None, "road_check": None}
+
+
+def keyed(tmp_path, **env):
+    from ev_journal.settings import Settings
+
+    (tmp_path / "id").write_text(KEY_ID)
+    (tmp_path / "secret").write_text(SECRET)
+    files = {"EVJ_XWEATHER_ID_FILE": str(tmp_path / "id")}
+    files["EVJ_XWEATHER_SECRET_FILE"] = str(tmp_path / "secret")
+    return Settings.from_env(files | {"EVJ_MQTT_URL": "mqtt://broker"} | env)
+
+
+def test_the_check_runs_the_lead_time_before_a_likely_trip(tmp_path, monkeypatch, capsys):
+    from ev_journal import __main__ as cli
+    from ev_journal import mqtt
+
+    sent = []
+    monkeypatch.setattr(
+        mqtt, "publish", lambda url, m, topic="", retain=True: sent.append((topic, m))
+    )
+    s, state = keyed(tmp_path), loop_state()
+    due = T0 + 4 * 3_600_000 - 45 * 60_000  # 07:15
+    assert cli.road_due(s, state, T0) == due  # wait until then
+    fake = Fake([({"X-RateLimit-Remaining-Period": "5000"}, {"success": True, "response": []})])
+    fake.answers.append(({}, [meteo(8.0, 2.0, 0.0, 9000)] * 6))
+    out = cli.road_check(s, state, due, fake)
+    assert out["trip"]["from"] == "a" and out["for"] == "2026-01-12T08:00+00:00"
+    assert out["level"] == "GREEN" and state["road_quota"] == 5000
+    assert sent == [(mqtt.ROAD_TOPIC, out)] and state["road_check"] is out
+    assert cli.road_due(s, state, due + 60_000) is None  # once per trip
+    assert (
+        SECRET not in repr(sent) and SECRET not in repr(s) and SECRET not in capsys.readouterr().err
+    )
+
+
+def test_no_check_without_a_likely_trip_or_a_key(tmp_path):
+    from ev_journal import __main__ as cli
+    from ev_journal.settings import Settings
+
+    state = loop_state()
+    assert cli.road_due(Settings.from_env({}), state, T0) is None  # no key
+    s = keyed(tmp_path)
+    assert cli.road_due(s, state | {"rhythm": None}, T0) is None
+    assert cli.road_due(s, state | {"way_rows": state["way_rows"][:2]}, T0) is None
+
+
+def test_road_check_api(data_dir):
+    from conftest import TOKEN, CheckedClient
+
+    from ev_journal import places
+    from ev_journal.api import create_app
+
+    last = {"value": None}
+    app = create_app(places.store_path(data_dir), TOKEN, UTC, road_check=lambda: last["value"])
+    c = CheckedClient(app)
+    c.headers["Authorization"] = f"Bearer {TOKEN}"
+    assert c.get("/road-check").status_code == 404
+    fake = Fake(
+        [({}, {"success": True, "response": [road(str(i), 2 if i == 1 else 0) for i in range(6)]})]
+    )
+    fake.answers.append(({}, {"success": True, "response": [road("0", 2, "ICE")]}))
+    trip = {"from": "a", "to": "b", "start": "x", "end": "y"}
+    last["value"] = {"trip": trip} | rc.check(LINE, START, NOW, client(fake), UTC)
+    got = c.get("/road-check").json()
+    assert got["level"] == "RED" and got["for"] == last["value"]["for"]
+    assert got["items"][0] | {"at": None} == {
+        "km": 1.0,
+        "level": "RED",
+        "what": ["ice"],
+        "at": None,
+        "source": "road",
+    }

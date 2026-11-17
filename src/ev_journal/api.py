@@ -265,6 +265,32 @@ class NextTrip(BaseModel):
     way: UsualWay | None = Field(description="The usual way of the trip, if found.")
 
 
+class RoadItem(BaseModel):
+    km: float = Field(description="Km from the start of the usual way.")
+    level: str = Field(description="YELLOW or RED.")
+    what: list[str] = Field(
+        description="Road data: the surface (ice, snow, slush, wet, ...); estimate: ice, fog."
+    )
+    at: str = Field(description="When the car would pass, local time.")
+    source: str = Field(description="road (Xweather road data) or estimate (Open-Meteo).")
+
+
+class RoadCheck(BaseModel):
+    trip: dict = Field(description="from, to (place ids), start and end of the trip window.")
+    checked_at: str = Field(description="Local time of the check.")
+    for_: str = Field(alias="for", description="The trip start the check is for.")
+    level: str | None = Field(description="Worst level: GREEN, YELLOW or RED. Null: skipped.")
+    points: int = Field(description="Points along the way, 1 km apart.")
+    road_points: int = Field(description="Points with Xweather road data.")
+    estimate_points: int = Field(description="Points with the Open-Meteo estimate.")
+    items: list[RoadItem] = Field(description="The points that are not GREEN, by km.")
+    skipped: str | None = Field(
+        description="quota: no check, the quota is under the reserve; detail: quota: "
+        "the surface details were not asked."
+    )
+    quota_left: int | None = Field(description="Xweather accesses left this period.")
+
+
 class TrackPoint(BaseModel):
     t: int = Field(description="Time of the GPS fix, ms.")
     lat: float
@@ -551,6 +577,7 @@ def create_app(
     heating_rows: Callable[[], list[dict]] = list,
     way_rows: Callable[[], list[dict]] = list,
     rhythm: Callable[[], dict | None] = lambda: None,
+    road_check: Callable[[], dict | None] = lambda: None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -563,7 +590,8 @@ def create_app(
     health_daily and health_fan give the health series (#49). heating_rows
     gives the commute journeys of the last recompute (heating.journey_rows).
     way_rows gives the journeys with their place ids and fixes (ways.usual_way),
-    rhythm the calendar rhythm of the last forecast (ways.next_trip)."""
+    rhythm the calendar rhythm of the last forecast (ways.next_trip).
+    road_check gives the last road check (roadcheck.check), or None."""
     tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
@@ -1016,6 +1044,16 @@ def create_app(
         calendar rhythm the forecast finds, with its usual way. found is
         false when no trip starts on min_sure of the matching past days."""
         return ways.next_trip(way_rows(), rhythm(), tz, store.now_ms(), min_sure)
+
+    @r.get("/road-check", response_model=RoadCheck, responses=nf)
+    def get_road_check():
+        """The last road check before a likely trip: the worst level along
+        the usual way and the points that are not GREEN. 404 before the
+        first check."""
+        out = road_check()
+        if out is None:
+            raise Fail(404, "no road check yet")
+        return out
 
     @r.get("/health/daily", response_model=list[HealthDay])
     def get_health_daily(

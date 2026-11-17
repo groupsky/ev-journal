@@ -1,7 +1,8 @@
 """ev-journal [loop|run|dry-run]
 
 loop (the default): run every EVJ_INTERVAL_SEC seconds, run the plug check
-  at EVJ_PLUG_CHECK_AT, and serve the API on EVJ_API_PORT when
+  at EVJ_PLUG_CHECK_AT, the road check EVJ_ROAD_LEAD_MIN before the next
+  likely trip when the Xweather key is set, and serve the API on EVJ_API_PORT when
   EVJ_API_TOKEN_FILE is set.
 run: read, recompute everything, write to InfluxDB and MQTT once.
 dry-run: read and recompute, print counts per month, what the plug check
@@ -31,10 +32,12 @@ from ev_journal import (
     plugcheck,
     price,
     reminders,
+    roadcheck,
     source,
     track,
     tyres,
     upkeep,
+    ways,
 )
 from ev_journal.influx import Influx
 from ev_journal.journeys import Result, build, month_key
@@ -451,6 +454,44 @@ def journey_track(s: Settings, fixes: dict, journey_id: int) -> list[dict] | Non
     return track.journey_track(fx, source.counters(db, start, end))
 
 
+def road_due(s: Settings, state: dict, now: int) -> int | None:
+    """When the road check for the next likely trip is due, ms; None: no
+    key, no likely trip with a usual way, or already checked (#55)."""
+    if not (s.xweather_id and s.xweather_secret):
+        return None
+    trip = ways.next_trip(state["way_rows"], state["rhythm"], ZoneInfo(s.tz), now)
+    if not trip["found"] or roadcheck.trip_key(trip) == state["road_done"]:
+        return None
+    state["road_trip"] = trip
+    return roadcheck.due_at(trip, s.road_lead_min)
+
+
+def road_check(s: Settings, state: dict, now: int, fetch=roadcheck.urllib_fetch) -> dict:
+    """Check the road weather for state["road_trip"], keep it for the API
+    and publish it on MQTT. Marks the trip as checked, also on a failure."""
+    from ev_journal import mqtt
+
+    trip = state["road_trip"]
+    state["road_done"] = roadcheck.trip_key(trip)
+    out = roadcheck.check(
+        trip["way"]["line"]["coordinates"],
+        int(datetime.fromisoformat(trip["start"]).timestamp() * 1000),
+        now,
+        roadcheck.Client(fetch, s.xweather_id, s.xweather_secret),
+        ZoneInfo(s.tz),
+        s.road_kmh,
+        s.road_reserve,
+        state["road_quota"],
+        s.road_rules,
+    )
+    state["road_quota"] = out["quota_left"]
+    out = {"trip": {k: trip[k] for k in ("from", "to", "start", "end")}} | out
+    state["road_check"] = out
+    if s.mqtt_url:
+        mqtt.publish(s.mqtt_url, out, mqtt.ROAD_TOPIC)
+    return out
+
+
 def serve_api(s: Settings, state: dict) -> None:
     import uvicorn
 
@@ -482,6 +523,7 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["heating_rows"],
         lambda: state["way_rows"],
         lambda: state["rhythm"],
+        lambda: state["road_check"],
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -716,6 +758,10 @@ def main() -> None:
             "heating_rows": [],
             "way_rows": [],
             "rhythm": None,
+            "road_trip": None,
+            "road_done": None,
+            "road_quota": None,
+            "road_check": None,
         }
         if s.api_token:
             serve_api(s, state)
@@ -731,8 +777,16 @@ def main() -> None:
                     print(f"ev-journal: plug check failed: {e!r}", file=sys.stderr)
                 next_check = plugcheck.next_at(now, s.plug_check_at, tz)
                 continue
+            road_at = road_due(s, state, now)
+            if road_at is not None and now >= road_at:
+                try:
+                    road_check(s, state, now)
+                except Exception as e:  # one try per trip
+                    print(f"ev-journal: road check failed: {e!r}", file=sys.stderr)
+                continue
             if now < next_run:
-                time.sleep((min(next_run, next_check or next_run) - now) / 1000)
+                wake = min(t for t in (next_run, next_check, road_at) if t is not None)
+                time.sleep((wake - now) / 1000)
                 continue
             next_run = now + s.interval_sec * 1000
             try:

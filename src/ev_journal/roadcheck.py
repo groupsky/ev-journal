@@ -222,7 +222,7 @@ def check(
         levels.append(None if p is None else int(p.get("summaryIndex", 0)))
     what: dict[int, list[str]] = {i: [] for i in range(len(pts))}
     bad = [i for i, lv in enumerate(levels) if lv]
-    if bad and left is not None and left - DETAIL_COST * len(bad) >= reserve:
+    if bad and (left is None or left - DETAIL_COST * len(bad) >= reserve):
         headers, data = client.xweather(
             "/conditions", _road_body([pts[i] for i in bad], [times[i] for i in bad], now_ms)
         )
