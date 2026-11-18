@@ -1,4 +1,4 @@
-"""ev-journal [loop|run|dry-run]
+"""ev-journal [loop|run|dry-run|import-ovms DIR]
 
 loop (the default): run every EVJ_INTERVAL_SEC seconds, run the plug check
   at EVJ_PLUG_CHECK_AT, the road check EVJ_ROAD_LEAD_MIN before the next
@@ -7,6 +7,10 @@ loop (the default): run every EVJ_INTERVAL_SEC seconds, run the plug check
 run: read, recompute everything, write to InfluxDB and MQTT once.
 dry-run: read and recompute, print counts per month, what the plug check
   would decide now and the reminders it would send, write nothing.
+import-ovms DIR: read the OVMS daily export zips in DIR and write their
+  charges to the table ovms_charges (#62). It reads InfluxDB for the house
+  charger meter and never writes to it. Run it again: the same zips give
+  the same rows.
 """
 
 import bisect
@@ -28,6 +32,7 @@ from ev_journal import (
     heating,
     homecharge,
     outputs,
+    ovms,
     places,
     plugcheck,
     price,
@@ -51,6 +56,7 @@ def compute(s: Settings) -> Result:
     pl = places.all_places(store)
     labels = places.all_labels(store)
     away_costs = charges.known_costs(store)
+    ovms_rows = ovms.stored(store)
     store.close()
     db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
     trips, sessions = source.trips(db), source.charges(db)
@@ -78,7 +84,7 @@ def compute(s: Settings) -> Result:
         p.cost_eur = heating.cost(p, prices, t.price_eur_per_kwh if t else None)
     heating.totals(r, ps, ZoneInfo(s.tz))
     r.heating_rows = heating.journey_rows(r, outdoor)
-    home_charge_model(s, db, r, set(home), end)
+    home_charge_model(s, db, r, set(home), end, ovms_rows)
     advice(s, db, r)
     return r
 
@@ -163,8 +169,33 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
     )
 
 
-def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: int) -> None:
-    """Back-test, drift per month and the live estimate of a home charge (#8)."""
+def charge_models(s: Settings, r: Result, hc: list, ovms_rows=()) -> None:
+    """The models from the live home charges. The OVMS charges (#62) join
+    only the level rates and their months: their battery kWh comes from the
+    live kWh per %, so they would teach the other models nothing new."""
+    r.backtest = homecharge.backtest(hc)
+    r.soc_model = homecharge.fit(hc)
+    # Only the nights before the first live home charge, so none counts twice.
+    first = min((c.start for c in hc), default=None)
+    ov = [c for c in ovms_rows if first is None or c.end < first]
+    ov = ovms.home_charges(ov, r.soc_model.kwh_per_pct, ZoneInfo(s.tz))
+    r.level_sources = {"live": hc, "ovms": ov}
+    r.levels = forecast.levels(hc + ov)
+    for c in hc + ov:
+        r.level_months.setdefault(c.month, []).append(c)
+    r.level_months = {k: forecast.level_rates(v) for k, v in sorted(r.level_months.items())}
+    months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
+    for m in r.months:
+        if mm := months.get(m.key):
+            m.kwh_per_pct, m.meter_ratio = mm.kwh_per_pct, mm.meter_ratio
+            m.overhead_kwh, m.drift_flag = mm.overhead_kwh, mm.drift_flag
+
+
+def home_charge_model(
+    s: Settings, db: Influx, r: Result, home: set[int], now: int, ovms_rows=()
+) -> None:
+    """Back-test, drift per month and the live estimate of a home charge (#8).
+    ovms_rows: the stored OVMS charges (#62), for the level rates only."""
     tz = ZoneInfo(s.tz)
     hc = []
     for c in r.charges:
@@ -186,17 +217,7 @@ def home_charge_model(s: Settings, db: Influx, r: Result, home: set[int], now: i
                     homecharge.charging_hours(bs),
                 )
             )
-    r.backtest = homecharge.backtest(hc)
-    r.soc_model = homecharge.fit(hc)
-    r.levels = forecast.levels(hc)
-    for c in hc:
-        r.level_months.setdefault(c.month, []).append(c)
-    r.level_months = {k: forecast.level_rates(v) for k, v in sorted(r.level_months.items())}
-    months = homecharge.drift(hc, s.drift_pct, s.drift_kwh)
-    for m in r.months:
-        if mm := months.get(m.key):
-            m.kwh_per_pct, m.meter_ratio = mm.kwh_per_pct, mm.meter_ratio
-            m.overhead_kwh, m.drift_flag = mm.overhead_kwh, mm.drift_flag
+    charge_models(s, r, hc, ovms_rows)
     last = r.trips[-1] if r.trips else None
     if last is None or last.end_place is None or last.end_place.kind != "home":
         return
@@ -699,6 +720,18 @@ def dry_run(s: Settings) -> None:
         "battery kW per level: "
         + ", ".join(f"{name} {kw:.2f}" for name, _m, kw in r.levels or forecast.LEVELS)
     )
+    for src, cs in r.level_sources.items():  # where the level rates come from (#62)
+        by = forecast.level_rates(cs)
+        nights = forecast.level_rates([c for c in cs if c.hours >= 5])
+        print(
+            f"  {src:5s} {len(cs)} home charges: "
+            + ", ".join(
+                f"{name} {statistics.median(by[name]):.2f} (n = {len(by[name])},"
+                f" full nights >= 5 h: {len(nights.get(name, ()))})"
+                for name, _m, _kw in forecast.LEVELS
+                if name in by
+            )
+        )
     for key, by in r.level_months.items():  # to see a season or temperature effect
         print(
             f"  {key}  "
@@ -760,6 +793,24 @@ def dry_run(s: Settings) -> None:
         shutil.rmtree(tmp)
 
 
+def import_ovms(s: Settings, path: Path) -> None:
+    """Read the OVMS export zips in a folder into the store (#62)."""
+    if not any(path.glob("*.zip")):
+        sys.exit(f"import-ovms: no *.zip in {path}")  # do not wipe the table
+    store = places.open_store(s.data_dir)
+    try:
+        db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
+        cs = ovms.load(path, places.all_places(store), lambda a, b: source.meter_minutes(db, a, b))
+        ovms.save(store, cs)
+    finally:
+        store.close()
+    home = [c for c in cs if c.at_home]
+    print(
+        f"ovms charges: {len(cs)}, at home {len(home)},"
+        f" matched to the meter {sum(c.meter_kwh is not None for c in home)}"
+    )
+
+
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "loop"
     s = Settings.from_env()
@@ -767,6 +818,8 @@ def main() -> None:
         dry_run(s)
     elif cmd == "run":
         run(s)
+    elif cmd == "import-ovms" and len(sys.argv) > 2:
+        import_ovms(s, Path(sys.argv[2]))
     elif cmd == "loop":
         state = {
             "stops": [],
