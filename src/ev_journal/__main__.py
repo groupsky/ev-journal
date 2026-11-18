@@ -36,6 +36,7 @@ from ev_journal import (
     places,
     plugcheck,
     price,
+    proxy,
     reminders,
     roadcheck,
     source,
@@ -533,6 +534,30 @@ def road_check(s: Settings, state: dict, now: int, fetch=roadcheck.urllib_fetch)
     return out
 
 
+def proxy_road(s: Settings, state: dict, points: list, fetch=roadcheck.urllib_fetch) -> dict:
+    """POST /proxy/road: the road check at the car's points, sharing the
+    quota with the road check (#70)."""
+    now = int(time.time() * 1000)
+    out = roadcheck.at_points(
+        points,
+        now,
+        roadcheck.Client(fetch, s.xweather_id, s.xweather_secret, s.routes_key),
+        ZoneInfo(s.tz),
+        s.road_reserve,
+        quota_now(state["road_quota"], now),
+        s.road_rules,
+    )
+    if out["quota_left"] is not None and out["skipped"] != "quota":
+        state["road_quota"] = (out["quota_left"], now)
+    return out
+
+
+def proxy_routes(s: Settings, origin, destination, departure_ms, fetch=roadcheck.urllib_fetch):
+    """POST /proxy/routes with the server's Google Routes key (#70)."""
+    client = roadcheck.Client(fetch, s.xweather_id, s.xweather_secret, s.routes_key)
+    return proxy.routes(client, s.routes_key, origin, destination, departure_ms)
+
+
 def serve_api(s: Settings, state: dict) -> None:
     import uvicorn
 
@@ -565,6 +590,12 @@ def serve_api(s: Settings, state: dict) -> None:
         lambda: state["way_rows"],
         lambda: state["rhythm"],
         lambda: state["road_check"],
+        car_token=s.car_token,
+        road_proxy=(
+            (lambda pts: proxy_road(s, state, pts)) if s.xweather_id and s.xweather_secret else None
+        ),
+        routes_proxy=(lambda o, d, t: proxy_routes(s, o, d, t)) if s.routes_key else None,
+        limit=proxy.RateLimit(s.proxy_per_min, s.proxy_per_day),
     )
     server = uvicorn.Server(uvicorn.Config(app, host=s.api_host, port=s.api_port))
     thread = threading.Thread(target=server.run, daemon=True)

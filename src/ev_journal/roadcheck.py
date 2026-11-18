@@ -8,6 +8,7 @@ that are not GREEN, by km from the start. No place or road names.
 
 import json
 import sys
+import time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
@@ -69,28 +70,52 @@ def points_along(coords: list, step_m: float = STEP_M) -> list[tuple[float, floa
 
 
 class Client:
-    """HTTP calls with the Xweather key. Errors never carry the key."""
+    """HTTP calls with the outside keys. Errors never carry a key. Each call
+    writes one log line: API, size, cost, quota left and time; never the
+    URL or the body, so no coordinates and no keys (#70)."""
 
-    def __init__(self, fetch, client_id: str, secret: str):
+    def __init__(self, fetch, client_id: str | None, secret: str | None, *more_keys: str):
         self._fetch, self._id, self._secret = fetch, client_id, secret
+        self._keys = [k for k in (secret, client_id, *more_keys) if k]
 
-    def get(self, url: str, body: list | None = None) -> tuple[dict, object]:
+    def get(
+        self,
+        url: str,
+        body: list | dict | None = None,
+        api: str = "?",
+        n: int = 1,
+        cost: int | None = None,
+        headers: dict | None = None,
+    ) -> tuple[dict, object]:
+        t0, left, ok = time.monotonic(), None, "failed"
         try:
-            headers, data = self._fetch(url, body)
+            if headers:
+                got, data = self._fetch(url, body, headers)
+            else:
+                got, data = self._fetch(url, body)
+            got = {k.lower(): v for k, v in got.items()}
+            left, ok = _quota(got), "ok"
+            return got, data
         except Exception as e:
             raise RuntimeError(self._clean(f"{type(e).__name__}: {e}")) from None
-        return {k.lower(): v for k, v in headers.items()}, data
+        finally:
+            ms = round((time.monotonic() - t0) * 1000)
+            print(
+                f"ev-journal: call {api} {ok} n={n} cost={n if cost is None else cost}"
+                f" quota_left={left} ms={ms}",
+                file=sys.stderr,
+            )
 
-    def xweather(self, path: str, body: list) -> tuple[dict, object]:
+    def xweather(self, path: str, body: list, cost: int = 1) -> tuple[dict, object]:
         q = urllib.parse.urlencode(
             {"client_id": self._id, "client_secret": self._secret, "mindist": MINDIST}
         )
-        return self.get(f"{XWEATHER}{path}/route?{q}", body)
+        api = "xweather" + (path.replace("/", "-") or "-summary")
+        return self.get(f"{XWEATHER}{path}/route?{q}", body, api, len(body), cost * len(body))
 
     def _clean(self, text: str) -> str:
-        for s in (self._secret, self._id):
-            if s:
-                text = text.replace(s, "***").replace(urllib.parse.quote(s, safe=""), "***")
+        for s in self._keys:
+            text = text.replace(s, "***").replace(urllib.parse.quote(s, safe=""), "***")
         return text
 
 
@@ -186,40 +211,34 @@ def _meteo(client: Client, pts: list, rules: Rules) -> list[dict]:
                 "timezone": "GMT",
             }
         )
-        _h, data = client.get(f"{OPEN_METEO}?{q}")
+        _h, data = client.get(f"{OPEN_METEO}?{q}", None, "open-meteo", len(part), 0)
         out += data if isinstance(data, list) else [data]
     return out
 
 
-def check(
-    coords: list,
-    start_ms: int,
+def assess(
+    pts: list,
+    times: list[float],
     now_ms: int,
     client: Client,
-    tz,
-    kmh: float = 50.0,
     reserve: int = 1000,
     quota_left: int | None = None,
     rules: Rules = Rules(),
 ) -> dict:
-    """Road weather along a usual way (GeoJSON coordinates) for a start at
-    start_ms, at kmh. quota_left is the last known Xweather quota; below
-    reserve the check is skipped. Returns the result with the new
-    quota_left."""
-    pts = points_along(coords)
-    times = [start_ms + km / kmh * 3_600_000 for km, _a, _b in pts]
+    """Road weather at points (km, lat, lon) at times (ms): Xweather summary
+    first, detail only where not GREEN, the Open-Meteo estimate where there
+    is no road data. Below reserve no call is made. Returns per point the
+    level index (None: unknown), what and source, with quota_left and
+    skipped."""
+    n = len(pts)
     out = {
-        "checked_at": _iso(now_ms, tz),
-        "for": _iso(start_ms, tz),
-        "level": None,
-        "points": len(pts),
-        "road_points": 0,
-        "estimate_points": 0,
-        "items": [],
-        "skipped": None,
+        "levels": [None] * n,
+        "what": [[] for _ in range(n)],
+        "source": ["none"] * n,
         "quota_left": quota_left,
+        "skipped": None,
     }
-    if quota_left is not None and quota_left - len(pts) < reserve:
+    if quota_left is not None and quota_left - n < reserve:
         out["skipped"] = "quota"
         return out
     headers, data = client.xweather("", _road_body(pts, times, now_ms))
@@ -229,11 +248,13 @@ def check(
     for i, t in enumerate(times):
         p = _period(summary.get(str(i), {}), t / 1000)
         levels.append(None if p is None else int(p.get("summaryIndex", 0)))
-    what: dict[int, list[str]] = {i: [] for i in range(len(pts))}
+    what = out["what"]
     bad = [i for i, lv in enumerate(levels) if lv]
     if bad and (left is None or left - DETAIL_COST * len(bad) >= reserve):
         headers, data = client.xweather(
-            "/conditions", _road_body([pts[i] for i in bad], [times[i] for i in bad], now_ms)
+            "/conditions",
+            _road_body([pts[i] for i in bad], [times[i] for i in bad], now_ms),
+            DETAIL_COST,
         )
         out["quota_left"] = _quota(headers)
         detail = _by_id(data)
@@ -260,15 +281,47 @@ def check(
             for i, hourly in zip(none, answers, strict=True):
                 lv, what[i] = estimate(hourly.get("hourly") or {}, times[i] / 1000, rules)
                 levels[i] = LEVELS.index(lv)
-    out["road_points"] = source.count("road")
-    out["estimate_points"] = source.count("estimate")
+    out["levels"], out["source"] = levels, source
+    return out
+
+
+def check(
+    coords: list,
+    start_ms: int,
+    now_ms: int,
+    client: Client,
+    tz,
+    kmh: float = 50.0,
+    reserve: int = 1000,
+    quota_left: int | None = None,
+    rules: Rules = Rules(),
+) -> dict:
+    """Road weather along a usual way (GeoJSON coordinates) for a start at
+    start_ms, at kmh. quota_left is the last known Xweather quota; below
+    reserve the check is skipped. Returns the result with the new
+    quota_left."""
+    pts = points_along(coords)
+    times = [start_ms + km / kmh * 3_600_000 for km, _a, _b in pts]
+    a = assess(pts, times, now_ms, client, reserve, quota_left, rules)
+    levels, source = a["levels"], a["source"]
+    out = {
+        "checked_at": _iso(now_ms, tz),
+        "for": _iso(start_ms, tz),
+        "level": None,
+        "points": len(pts),
+        "road_points": source.count("road"),
+        "estimate_points": source.count("estimate"),
+        "items": [],
+        "skipped": a["skipped"],
+        "quota_left": a["quota_left"],
+    }
     for i, lv in enumerate(levels):
         if lv:
             out["items"].append(
                 {
                     "km": round(pts[i][0], 1),
                     "level": LEVELS[lv],
-                    "what": what[i],
+                    "what": a["what"][i],
                     "at": _iso(times[i], tz),
                     "source": source[i],
                 }
@@ -278,11 +331,42 @@ def check(
     return out
 
 
+def at_points(
+    points: list[tuple[float, float, float]],
+    now_ms: int,
+    client: Client,
+    tz,
+    reserve: int = 1000,
+    quota_left: int | None = None,
+    rules: Rules = Rules(),
+) -> dict:
+    """The road check for points the car sends: (lat, lon, at ms). One
+    answer per point, in the order sent (#70)."""
+    pts = [(0.0, lat, lon) for lat, lon, _t in points]
+    times = [float(t) for _a, _b, t in points]
+    a = assess(pts, times, now_ms, client, reserve, quota_left, rules)
+    return {
+        "points": [
+            {
+                "level": None if lv is None else LEVELS[lv],
+                "what": what,
+                "at": _iso(t, tz),
+                "source": src,
+            }
+            for lv, what, t, src in zip(a["levels"], a["what"], times, a["source"], strict=True)
+        ],
+        "quota_left": a["quota_left"],
+        "skipped": a["skipped"],
+    }
+
+
 def _iso(ms: float, tz) -> str:
     return datetime.fromtimestamp(ms / 1000, tz).isoformat(timespec="minutes")
 
 
-def urllib_fetch(url: str, body: list | None = None, timeout: float = 30) -> tuple[dict, object]:
+def urllib_fetch(
+    url: str, body: list | dict | None = None, headers: dict | None = None, timeout: float = 30
+) -> tuple[dict, object]:
     """POST JSON when body is given, else GET. Returns (headers, JSON)."""
     import urllib.request
 
@@ -290,5 +374,7 @@ def urllib_fetch(url: str, body: list | None = None, timeout: float = 30) -> tup
     req = urllib.request.Request(url, data=data, method="GET" if body is None else "POST")
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return dict(r.headers.items()), json.loads(r.read())

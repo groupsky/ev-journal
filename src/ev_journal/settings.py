@@ -58,6 +58,10 @@ class Settings:
     road_reserve: int = 1000
     road_kmh: float = 50.0
     road_rules: RoadRules = field(default_factory=RoadRules)
+    car_token: str | None = field(default=None, repr=False)  # (#70)
+    routes_key: str | None = field(default=None, repr=False)
+    proxy_per_min: int = 20
+    proxy_per_day: int = 1000
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -109,6 +113,10 @@ class Settings:
                 fog_yellow_m=float(e.get("EVJ_ROAD_FOG_YELLOW_M", "1000")),
                 fog_red_m=float(e.get("EVJ_ROAD_FOG_RED_M", "200")),
             ),
+            car_token=_read_file(e.get("EVJ_CAR_TOKEN_FILE")),
+            routes_key=_read_file(e.get("EVJ_GOOGLE_ROUTES_KEY_FILE")),
+            proxy_per_min=_positive(e, "EVJ_PROXY_PER_MIN", "20"),
+            proxy_per_day=_positive(e, "EVJ_PROXY_PER_DAY", "1000"),
         )._checked()
 
     def _checked(self) -> "Settings":

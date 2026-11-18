@@ -11,8 +11,14 @@ only on the private network.
 ## Auth
 
 Every request needs `Authorization: Bearer <token>`. The token is the content
-of `EVJ_API_TOKEN_FILE`, outside the repo. Without a configured token every
-request gets `401`.
+of `EVJ_API_TOKEN_FILE`, outside the repo (or the car token below). A
+missing or wrong token gets `401`.
+
+**The car token** is the content of `EVJ_CAR_TOKEN_FILE` (optional). It may
+call only the proxy (`POST /proxy/road`, `POST /proxy/routes`) and these
+GETs: `/places`, `/advice`, `/journeys`, `/journeys/days`,
+`/journeys/{id}/track`, `/upkeep`, `/tyres`, `/health/daily`, `/health/fan`.
+Any other call with it gets `403`. The full token may call everything.
 
 ## Places and routes
 
@@ -29,7 +35,8 @@ Routes (`/routes`, `/routes/{id}`) work the same. A route is a name and an
 ordered list of existing place ids. A place that a route uses cannot be
 deleted (`409`); change or delete the route first.
 
-**Errors** are always `{"detail": "<text>"}`: `401` no or wrong token, `404`
+**Errors** are always `{"detail": "<text>"}`: `401` no or wrong token, `403`
+the car token may not call this, `404`
 not found, `409` conflict, `422` a bad request.
 
 **Sync.** Every write moves a row to the end of a sequence. A list returns
@@ -204,6 +211,63 @@ No check when no trip is likely or the trip has no usual way.
 
 The same JSON is published on MQTT, topic `homy/ioniq/road_check`,
 retained. The notice to a person is sent by the relay in homy.
+
+## Proxy for the car
+
+The car asks ev-journal instead of Xweather and Google, so the keys stay on
+the server (`EVJ_XWEATHER_*_FILE`, `EVJ_GOOGLE_ROUTES_KEY_FILE`). The keys
+are never in the logs, errors or answers. Each outside call writes one log
+line: the API, the number of points, the cost, the quota left and the time
+taken; never coordinates:
+
+```
+ev-journal: call xweather-summary ok n=12 cost=12 quota_left=8990 ms=240
+```
+
+**Rate limit.** Proxy calls are counted per token: at most
+`EVJ_PROXY_PER_MIN` (20) a minute and `EVJ_PROXY_PER_DAY` (1000) a UTC day.
+Over the limit: `429` with `Retry-After` (seconds). The count is kept in
+memory; a restart resets it.
+
+**Errors.** `503`: the key for this API is not set. `502`: the outside
+call failed (the log has the reason).
+
+`POST /proxy/road` runs the road check above at the points the car sends:
+summary first, detail only for the points that are not GREEN, `mindist`,
+the same quota and reserve rule (the quota is shared with the road check),
+and the Open-Meteo estimate where there is no road data. At most 500
+points; `at` needs a time zone:
+
+```json
+{"points": [{"lat": 0.1, "lon": 0.2, "at": "2026-01-12T08:00:00Z"},
+            {"lat": 0.11, "lon": 0.2, "at": "2026-01-12T08:01:00Z"}]}
+```
+
+The answer has one entry per point, in the same order:
+
+```json
+{"points": [{"level": "GREEN", "what": [], "at": "2026-01-12T08:00+00:00", "source": "road"},
+            {"level": "YELLOW", "what": ["ice"], "at": "2026-01-12T08:01+00:00", "source": "estimate"}],
+ "quota_left": 8990, "skipped": null}
+```
+
+- `level`: `GREEN`, `YELLOW`, `RED`, or `null` when not known.
+- `source`: `road` (Xweather road data), `estimate` (Open-Meteo) or `none`.
+- `skipped` as in `GET /road-check`. With `"quota"` no call was made, and
+  every point has `level: null`, `source: "none"`.
+
+`POST /proxy/routes` asks Google Routes `computeRoutes` (driving, with
+traffic) with the field mask `routes.duration,routes.distanceMeters`:
+
+```json
+{"origin": {"lat": 0.1, "lon": 0.2}, "destination": {"lat": 0.3, "lon": 0.4},
+ "departure": "2026-01-12T08:00:00Z"}
+```
+
+`departure` is optional; null or in the past means now. The answer is
+`{"duration_s": 987, "distance_m": 12345}`; both `null` when Google finds
+no route. The server's Google key must allow the Routes API from a server;
+the car's Android key does not.
 
 ## Health series
 
