@@ -123,33 +123,36 @@ def _charging(r: dict) -> bool:
     return r.get("chargestate") in CHARGING and kw is not None and kw > MIN_POWER_KW
 
 
-def _parts(s_rows: list[dict]) -> list[tuple[list[dict], list[dict]]]:
+def _parts(s_rows: list[dict]) -> list[tuple[list[dict], list[dict] | None]]:
     """Runs of charging rows with power (rule 4), each with the rows of the
-    pause before it. Any other row, or a gap of over 1 h, ends a run."""
+    pause before it. Any other row, or a gap of over 1 h, ends a run; after
+    a gap the pause is None."""
     parts, cur, pause = [], [], []
     for r in s_rows:
         if _charging(r) and _num(r.get("soc")) is not None:
             if cur and r["t"] - cur[-1]["t"] > MAX_ROW_GAP_MS:
                 parts.append((cur, pause))
-                cur, pause = [], []
+                cur, pause = [], None  # no rows: the gap is unknown, never joined
             cur.append(r)
         else:
             if cur:
                 parts.append((cur, pause))
                 cur, pause = [], []
-            pause.append(r)
+            if pause is not None:
+                pause.append(r)
     if cur:
         parts.append((cur, pause))
     return parts
 
 
-def _joins(last: list[dict], p: list[dict], pause: list[dict]) -> bool:
+def _joins(last: list[dict], p: list[dict], pause: list[dict] | None) -> bool:
     """Rule 5: a pause shorter than 3 h, with only stopped rows (or ghost
     charging rows with no power), the SoC never below where it stopped, and
     rising after it."""
     soc_a = _num(last[-1]["soc"])
     return (
-        p[0]["t"] - last[-1]["t"] < MAX_PAUSE_MS
+        pause is not None
+        and p[0]["t"] - last[-1]["t"] < MAX_PAUSE_MS
         and all(r.get("chargestate") in ("stopped", *CHARGING) for r in pause)
         and all((_num(r.get("soc")) or soc_a) >= soc_a for r in pause)
         and _num(p[0]["soc"]) >= soc_a

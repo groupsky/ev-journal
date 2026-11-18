@@ -158,7 +158,8 @@ battery side), `d.csv` (`ambient`, `tbattery`), `l.csv` (`latitude`,
 4. A row counts as charging only with `chargestate` `charging` or `topoff`
    and `chargepower` > 0.3 kW. Without this, about 14 % of home "charges"
    are false 20-min charges at 04–06 h with no SoC gain. Any other row, or
-   a gap of over 1 h between rows (a lost day), ends a part.
+   a gap of over 1 h between rows (a lost day), ends a part; a part after
+   such a gap is never joined (rule 5), as its pause is not known.
 5. A part joins the part before it across a pause shorter than 3 h when
    the pause has only `stopped` rows (or charging rows with no power), the
    SoC does not fall in between, and it goes on rising (about 4 % of

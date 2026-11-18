@@ -249,3 +249,19 @@ def test_ovms_nights_after_the_first_live_charge_are_left_out():
     late = [ovms_charge(ms(2026, 9, 1, 0), 2.64, 1.0, 7)]
     r, _hc = models(late)
     assert r.level_sources["ovms"] == []
+
+
+def test_a_row_gap_under_3h_does_not_join(tmp_path):
+    def half_hourly(h0, soc0):
+        return "".join(
+            srow(f"2025-01-10 {h0 + i // 2:02d}:{30 * (i % 2):02d}:00", soc0 + 2 * i)
+            for i in range(5)
+        )
+
+    s = half_hourly(1, 40) + half_hourly(5, 50)  # 2 h, no rows for 2 h, 2 h
+    assert [c.hours for c in charges_of(tmp_path, s)] == [2, 2]
+
+
+def test_import_of_an_empty_folder_stops(tmp_path):
+    with pytest.raises(SystemExit):
+        m.import_ovms(SimpleNamespace(data_dir=tmp_path), tmp_path)

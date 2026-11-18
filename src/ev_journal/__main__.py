@@ -795,6 +795,8 @@ def dry_run(s: Settings) -> None:
 
 def import_ovms(s: Settings, path: Path) -> None:
     """Read the OVMS export zips in a folder into the store (#62)."""
+    if not any(path.glob("*.zip")):
+        sys.exit(f"import-ovms: no *.zip in {path}")  # do not wipe the table
     store = places.open_store(s.data_dir)
     try:
         db = Influx(s.influx_url, s.influx_db, s.influx_read_user, s.influx_read_password)
