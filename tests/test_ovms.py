@@ -211,3 +211,41 @@ def test_other_models_do_not_change(monkeypatch):
     assert r.soc_model.kwh_per_pct == homecharge.kwh_per_pct(hc)
     assert seen == [hc]  # drift() sees the live charges only
     assert r.levels != r0.levels
+
+
+def test_march_hour_that_does_not_exist_is_dropped(tmp_path):
+    make_zip(tmp_path / "a.zip", srow("2025-03-30 02:30:00", 50) + srow("2025-03-30 03:30:00", 51))
+    (r,) = ovms.read_dir(tmp_path)["s"]
+    assert r["t"] == ms(2025, 3, 30, 1, 30) and r["soc"] == "51"
+
+
+def test_a_lost_day_ends_a_part(tmp_path):
+    def half_hourly(day, soc0):
+        return "".join(
+            srow(f"{day} {1 + i // 2:02d}:{30 * (i % 2):02d}:00", soc0 + i) for i in range(7)
+        )
+
+    s = half_hourly("2025-01-10", 40) + half_hourly("2025-01-11", 60)
+    assert [c.hours for c in charges_of(tmp_path, s)] == [3, 3]  # not one 27 h charge
+
+
+def test_a_done_pause_does_not_join(tmp_path):
+    s = (
+        "".join(srow(f"2025-01-10 {h:02d}:00:00", 40 + 3 * (h - 1)) for h in (1, 2, 3))
+        + srow("2025-01-10 03:30:00", 46, "done", 0)
+        + "".join(srow(f"2025-01-10 {h:02d}:30:00", 46 + 3 * (h - 4)) for h in (4, 5, 6))
+    )
+    assert [c.hours for c in charges_of(tmp_path, s)] == [2, 2]
+
+
+def test_save_replaces_old_rows(tmp_path):
+    db = places.open_store(tmp_path)
+    ovms.save(db, long_highs())
+    ovms.save(db, long_highs()[:2])
+    assert ovms.stored(db) == long_highs()[:2]
+
+
+def test_ovms_nights_after_the_first_live_charge_are_left_out():
+    late = [ovms_charge(ms(2026, 9, 1, 0), 2.64, 1.0, 7)]
+    r, _hc = models(late)
+    assert r.level_sources["ovms"] == []

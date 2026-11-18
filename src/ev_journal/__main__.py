@@ -175,7 +175,10 @@ def charge_models(s: Settings, r: Result, hc: list, ovms_rows=()) -> None:
     live kWh per %, so they would teach the other models nothing new."""
     r.backtest = homecharge.backtest(hc)
     r.soc_model = homecharge.fit(hc)
-    ov = ovms.home_charges(list(ovms_rows), r.soc_model.kwh_per_pct, ZoneInfo(s.tz))
+    # Only the nights before the first live home charge, so none counts twice.
+    first = min((c.start for c in hc), default=None)
+    ov = [c for c in ovms_rows if first is None or c.end < first]
+    ov = ovms.home_charges(ov, r.soc_model.kwh_per_pct, ZoneInfo(s.tz))
     r.level_sources = {"live": hc, "ovms": ov}
     r.levels = forecast.levels(hc + ov)
     for c in hc + ov:

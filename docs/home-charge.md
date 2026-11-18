@@ -137,8 +137,8 @@ never enter this repo: they hold GPS tracks.
 `ovms_charges`: start, end, hours at power, SoC start and end (BMS %), mean
 `chargepower`, outside and battery temperature at the start, home or away,
 and the meter kWh. Only the home/away label is stored, not the position.
-It reads InfluxDB for the meter and never writes to it. A charge is keyed
-by its start, so a second run with the same zips gives the same rows. On
+It reads InfluxDB for the meter and never writes to it. Each run reads the
+whole folder and replaces all rows, so the same zips give the same rows. On
 routy the zips go in the folder `ovms-export/` in ev-journal's data volume,
 copied there from the owner's copy. Inside the container that is
 `/data/ovms-export` (`EVJ_DATA_DIR` is `/data`), so the command there is
@@ -150,14 +150,18 @@ battery side), `d.csv` (`ambient`, `tbattery`), `l.csv` (`latitude`,
 
 1. `rec_time` is Europe/Berlin time, not local time. In the October hour
    that repeats, a time that goes back (in file order) is the second pass.
+   This misses a second pass that does not go back (the first row of a
+   file, or a car asleep across the change): such rows read 1 h early. A
+   time in the skipped March hour does not exist: dropped.
 2. Rows repeat at zip borders: a time is kept once.
 3. `soc` = 0 and `odometer` = 0 rows are wrong values: dropped.
 4. A row counts as charging only with `chargestate` `charging` or `topoff`
    and `chargepower` > 0.3 kW. Without this, about 14 % of home "charges"
-   are false 20-min charges at 04–06 h with no SoC gain. Any other row ends
-   a part.
+   are false 20-min charges at 04–06 h with no SoC gain. Any other row, or
+   a gap of over 1 h between rows (a lost day), ends a part.
 5. A part joins the part before it across a pause shorter than 3 h when
-   the SoC does not fall in between and goes on rising (about 4 % of
+   the pause has only `stopped` rows (or charging rows with no power), the
+   SoC does not fall in between, and it goes on rising (about 4 % of
    charges are split by a 20–110 min pause).
 6. SoC start, SoC end and the time come from the same span: the first and
    the last charging row. The hours at power are the parts; a joined pause
@@ -169,10 +173,13 @@ battery side), `d.csv` (`ambient`, `tbattery`), `l.csv` (`latitude`,
    %/h is divided by 1.065. If it is the BMS % after all, these rates read
    about 6 % low.
 
-A home charge is one whose last GPS fix with a lock, at or before its end,
-is inside a place of kind `home` (as for live charges). Its meter kWh are
-the house charger meter blocks from 5 min before the start to the end (the
-meter starts 2024-11-16, so earlier charges have none). Battery kWh = BMS %
+A home charge is one whose last GPS fix with a lock, in the charge or the
+6 h before it, is inside a place of kind `home` (as for live charges). The
+temperatures are read within 1 h of the start. Its meter kWh are all the
+house charger meter blocks from 5 min before the start to the end (the
+meter starts 2024-11-16, so earlier charges have none). Only OVMS charges
+that end before the first live home charge are used, so no night counts
+twice. Battery kWh = BMS %
 gained × the kWh per % of the live charges. These charges teach only the
 level rates and their months ([forecast.md](forecast.md), "Level"). They
 are not used for kWh per %, the model fit, the back-test or the drift: their

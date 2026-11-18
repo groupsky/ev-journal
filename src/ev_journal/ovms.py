@@ -14,7 +14,7 @@ import io
 import sqlite3
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -24,6 +24,9 @@ from ev_journal.journeys import month_key
 TZ = ZoneInfo("Europe/Berlin")  # rec_time is in this zone (rule 1)
 MIN_POWER_KW = 0.3  # a charging row counts only above this chargepower (rule 4)
 MAX_PAUSE_MS = 3 * 3_600_000  # a stopped pause shorter than this joins two parts (rule 5)
+MAX_ROW_GAP_MS = 3_600_000  # rows come every 1–10 min; a longer gap (a lost day) ends a part
+NEAR_MS = 3_600_000  # a temperature is read this close to the start
+GPS_BEFORE_MS = 6 * 3_600_000  # the GPS fix of a charge is from this long before it, or in it
 CHARGING = ("charging", "topoff")
 MIN_GAIN = 5.0  # a charge is kept with at least this many BMS %
 MIN_HOURS = 1.0  # and this many hours at power
@@ -53,16 +56,18 @@ def _num(v: str | None) -> float | None:
         return None
 
 
-def _ms(texts: list[str]) -> list[int]:
+def _ms(texts: list[str]) -> list[int | None]:
     """UTC ms of the rec_time values of one file, in file order. In the
-    October hour that repeats, a time that goes back sets fold=1 (rule 1)."""
+    October hour that repeats, a time that goes back sets fold=1 (rule 1).
+    A time that does not exist (the March hour that is skipped) gives None."""
     out, prev, fold = [], None, 0
     for t in texts:
         dt = datetime.fromisoformat(t)
-        ambiguous = (
-            dt.replace(fold=0, tzinfo=TZ).utcoffset() != dt.replace(fold=1, tzinfo=TZ).utcoffset()
-        )
-        if not ambiguous:
+        aware = dt.replace(tzinfo=TZ)
+        if aware.astimezone(UTC).astimezone(TZ).replace(tzinfo=None) != dt:
+            out.append(None)
+            continue
+        if aware.utcoffset() == dt.replace(fold=1, tzinfo=TZ).utcoffset():
             fold = 0
         elif prev is not None and dt < prev:
             fold = 1
@@ -85,6 +90,8 @@ def read_dir(path: Path) -> dict[str, list[dict]]:
                 text = zf.read(names[f"{key}.csv"]).decode("utf-8", "replace")
                 rows = [r for r in csv.DictReader(io.StringIO(text)) if r.get("rec_time")]
                 for r, t in zip(rows, _ms([r["rec_time"] for r in rows]), strict=True):
+                    if t is None:
+                        continue
                     if key == "s" and _num(r.get("soc")) == 0:
                         continue
                     if key == "d" and _num(r.get("odometer")) == 0:
@@ -111,36 +118,55 @@ class Charge:
         return self.soc_end - self.soc_start
 
 
-def _parts(s_rows: list[dict]) -> list[list[dict]]:
-    """Runs of charging rows with power (rule 4); any other row ends a run."""
-    parts, cur = [], []
+def _charging(r: dict) -> bool:
+    kw = _num(r.get("chargepower"))
+    return r.get("chargestate") in CHARGING and kw is not None and kw > MIN_POWER_KW
+
+
+def _parts(s_rows: list[dict]) -> list[tuple[list[dict], list[dict]]]:
+    """Runs of charging rows with power (rule 4), each with the rows of the
+    pause before it. Any other row, or a gap of over 1 h, ends a run."""
+    parts, cur, pause = [], [], []
     for r in s_rows:
-        kw = _num(r.get("chargepower"))
-        if r.get("chargestate") in CHARGING and kw is not None and kw > MIN_POWER_KW:
-            if _num(r.get("soc")) is not None:
-                cur.append(r)
-        elif cur:
-            parts.append(cur)
-            cur = []
+        if _charging(r) and _num(r.get("soc")) is not None:
+            if cur and r["t"] - cur[-1]["t"] > MAX_ROW_GAP_MS:
+                parts.append((cur, pause))
+                cur, pause = [], []
+            cur.append(r)
+        else:
+            if cur:
+                parts.append((cur, pause))
+                cur, pause = [], []
+            pause.append(r)
     if cur:
-        parts.append(cur)
+        parts.append((cur, pause))
     return parts
 
 
+def _joins(last: list[dict], p: list[dict], pause: list[dict]) -> bool:
+    """Rule 5: a pause shorter than 3 h, with only stopped rows (or ghost
+    charging rows with no power), the SoC never below where it stopped, and
+    rising after it."""
+    soc_a = _num(last[-1]["soc"])
+    return (
+        p[0]["t"] - last[-1]["t"] < MAX_PAUSE_MS
+        and all(r.get("chargestate") in ("stopped", *CHARGING) for r in pause)
+        and all((_num(r.get("soc")) or soc_a) >= soc_a for r in pause)
+        and _num(p[0]["soc"]) >= soc_a
+        and _num(p[-1]["soc"]) > soc_a
+    )
+
+
 def charges(s_rows: list[dict]) -> list[Charge]:
-    """Charges from the s.csv rows. A part joins the one before across a
-    pause shorter than 3 h when the SoC does not fall in between and goes
-    on rising (rule 5). SoC start, SoC end and hours come from the same
-    span: the first and last charging rows (rule 6)."""
+    """Charges from the s.csv rows: parts joined by rule 5. SoC start, SoC
+    end and hours come from the same span: the first and last charging rows
+    (rule 6); the hours leave a joined pause out."""
     groups: list[list[list[dict]]] = []
-    for p in _parts(s_rows):
-        if groups:
-            last = groups[-1][-1]
-            soc_a, soc_b0, soc_b1 = (_num(last[-1]["soc"]), _num(p[0]["soc"]), _num(p[-1]["soc"]))
-            if p[0]["t"] - last[-1]["t"] < MAX_PAUSE_MS and soc_b0 >= soc_a and soc_b1 > soc_a:
-                groups[-1].append(p)
-                continue
-        groups.append([p])
+    for p, pause in _parts(s_rows):
+        if groups and _joins(groups[-1][-1], p, pause):
+            groups[-1].append(p)
+        else:
+            groups.append([p])
     out = []
     for g in groups:
         first, last = g[0][0], g[-1][-1]
@@ -158,18 +184,21 @@ def charges(s_rows: list[dict]) -> list[Charge]:
     return out
 
 
-def _before(rows: list[dict], ts: list[int], t: int, field: str) -> float | None:
-    """The last value of a field at or before t; else the first one after it."""
+def _near(rows: list[dict], ts: list[int], t: int, field: str) -> float | None:
+    """The last value of a field in the hour up to t; else the first in the hour after it."""
     i = bisect.bisect_right(ts, t)
     for r in (*reversed(rows[:i]), *rows[i:]):
+        if abs(r["t"] - t) > NEAR_MS:
+            continue
         if (v := _num(r.get(field))) is not None:
             return v
     return None
 
 
 def _pos(l_rows: list[dict], ts: list[int], c: Charge) -> tuple[float, float] | None:
-    """The last GPS fix with a lock at or before the end of the charge."""
-    for r in reversed(l_rows[: bisect.bisect_right(ts, c.end)]):
+    """The last GPS fix with a lock in the charge, or in the 6 h before it."""
+    lo = bisect.bisect_left(ts, c.start - GPS_BEFORE_MS)
+    for r in reversed(l_rows[lo : bisect.bisect_right(ts, c.end)]):
         lat, lon = _num(r.get("latitude")), _num(r.get("longitude"))
         if lat is not None and lon is not None and _num(r.get("gpslock")) != 0 and (lat or lon):
             return lat, lon
@@ -184,14 +213,15 @@ def load(path: Path, pl: list[places.Place], meter_minutes) -> list[Charge]:
     d_ts, l_ts = [r["t"] for r in rows["d"]], [r["t"] for r in rows["l"]]
     out = charges(rows["s"])
     for c in out:
-        c.ambient_c = _before(rows["d"], d_ts, c.start, "ambient")
-        c.battery_c = _before(rows["d"], d_ts, c.start, "tbattery")
+        c.ambient_c = _near(rows["d"], d_ts, c.start, "ambient")
+        c.battery_c = _near(rows["d"], d_ts, c.start, "tbattery")
         p = places.place_at(pl, _pos(rows["l"], l_ts, c))
         c.at_home = p is not None and p.kind == "home"
         if c.at_home:
-            bs = homecharge.blocks(meter_minutes(c.start - METER_LEAD_MS, c.end))
-            meter, _pre = homecharge.split([b for b in bs if b.end >= c.start - METER_LEAD_MS])
-            c.meter_kwh = meter or None
+            # All meter blocks in the span: a short last part is charging, not preheat.
+            t0 = c.start - METER_LEAD_MS
+            bs = homecharge.blocks(meter_minutes(t0, c.end))
+            c.meter_kwh = sum(b.kwh for b in bs if b.end >= t0) or None
     return out
 
 
@@ -201,9 +231,11 @@ COLUMNS = (
 
 
 def save(db: sqlite3.Connection, cs: list[Charge]) -> None:
-    """Write the charges; a charge with the same start is replaced, so the
-    same zips give the same rows."""
+    """Replace all rows with the charges: the import reads the whole folder,
+    so the same zips give the same rows, and a charge that moved or went
+    away leaves no old row."""
     with db:
+        db.execute("DELETE FROM ovms_charges")
         db.executemany(
             f"INSERT OR REPLACE INTO ovms_charges ({COLUMNS})"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
