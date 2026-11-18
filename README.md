@@ -65,6 +65,8 @@ environment points to.
   odometer gap, the station match counts and the back-tests.
   Writes nothing to InfluxDB or MQTT, works on a temporary copy of the
   store, and uses only the cached station feed.
+- `ev-journal import-ovms DIR`: read the old OVMS daily export zips in `DIR`
+  into the store, for the level rates ([docs/home-charge.md](docs/home-charge.md)).
 
 Outputs and rules: [docs/outputs.md](docs/outputs.md). API: [docs/api.md](docs/api.md).
 Away charges and their price: [docs/charges.md](docs/charges.md). Price of

@@ -188,7 +188,7 @@ driving?" ([#47](https://github.com/groupsky/ev-journal/issues/47)).
 
 ## Storage and outputs
 
-- The store (places, routes, upkeep items, tyre sets and swaps, labels, the health days cache, prices, answers, commands, sent notice ids) is **one SQLite file** in a volume. Everything else is derived and recomputed.
+- The store (places, routes, upkeep items, tyre sets and swaps, labels, the health days cache, prices, answers, commands, sent notice ids, the imported OVMS charges) is **one SQLite file** in a volume. Everything else is derived and recomputed.
 - Outputs:
   - InfluxDB measurements written with the write user, like `ioniq_charges`: one row per trip, per journey and per month, and track points for maps. Grafana dashboards in homy read them.
   - A retained MQTT summary (the last 10 journeys, the month, cost per kWh and per 100 km for all time and the last 30 days, the upkeep items that are due, and the tyre set on now with its hint) for a Home Assistant view in homy.
