@@ -318,3 +318,45 @@ def test_nothing_known_is_not_green():
 
     out = rc.check(LINE, START, NOW, client(flaky), UTC)
     assert out["level"] is None and out["skipped"] == "estimate" and out["items"] == []
+
+
+def test_points_from_the_car_get_one_answer_each(capsys):
+    """The proxy (#70): summary first, detail where not GREEN, the estimate
+    where there is no road data; answers in the order sent."""
+    pts = [(0.1, 0.2, START), (0.11, 0.2, START + 60_000), (0.12, 0.2, START + 120_000)]
+    fake = Fake(
+        [
+            (
+                {"X-RateLimit-Remaining-Period": "9000"},
+                {"success": True, "response": [road("0", 0), road("1", 2), road("2", None)]},
+            ),
+            ({"X-RateLimit-Remaining-Period": "8995"}, {"response": [road("0", 2, "ICE")]}),
+            ({}, meteo(-3, -4, 1.0, 5000)),
+        ]
+    )
+    out = rc.at_points(pts, NOW, client(fake), UTC)
+    (u1, b1), (u2, b2), (u3, _b3) = fake.calls
+    assert "mindist=" in u1 and len(b1) == 3 and len(b2) == 1 and b2[0]["p"] == b1[1]["p"]
+    assert "open-meteo" in u3
+    assert [p["level"] for p in out["points"]] == ["GREEN", "RED", "RED"]
+    assert [p["what"] for p in out["points"]] == [[], ["ice"], ["ice"]]
+    assert [p["source"] for p in out["points"]] == ["road", "road", "estimate"]
+    assert out["points"][0]["at"] == rc._iso(START, UTC)
+    assert out["quota_left"] == 8995 and out["skipped"] is None
+    # One log line per outside call: API, size, cost, quota, time; no coordinates.
+    log = [ln for ln in capsys.readouterr().err.splitlines() if " call " in ln]
+    assert len(log) == 3
+    assert "xweather-summary ok n=3 cost=3 quota_left=9000 ms=" in log[0]
+    assert "xweather-conditions ok n=1 cost=5 quota_left=8995 ms=" in log[1]
+    assert "open-meteo ok n=1 cost=0" in log[2]
+    assert not any(x in "\n".join(log) for x in ("0.1", "0.2", KEY_ID, SECRET))
+
+
+def test_points_below_the_reserve_make_no_call():
+    pts = [(0.1, 0.2, START)]
+    fake = Fake([])
+    out = rc.at_points(pts, NOW, client(fake), UTC, reserve=1000, quota_left=1000)
+    assert fake.calls == [] and out["skipped"] == "quota"
+    assert out["points"] == [
+        {"level": None, "what": [], "at": rc._iso(START, UTC), "source": "none"}
+    ]
