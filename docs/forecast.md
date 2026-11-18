@@ -199,6 +199,34 @@ Left out for now:
   holiday adds "turn the preheat off". The car has no modem, so this is a
   message.
 
+### A charge that runs now
+
+The car may already charge when the advice is made: plugged in with no
+delay timer ([#61](https://github.com/groupsky/ev-journal/issues/61)). The
+house meter shows it (the live home charge, [home-charge.md](home-charge.md)).
+
+- **Level**: the one whose meter kW is nearest to the meter power now.
+- **Since**: the first minute of the running meter block.
+- **Reach** if it is not stopped: SoC now + hours from now × the level's
+  battery kW ÷ kWh per %, at most 100 %. Once at the end of the night zone,
+  once at departure (the zone end when there is no departure).
+- It is an estimate, so the message says "около" (about). The rate falls
+  near the end and is lower on cold nights: on 2026-11-16 the model gave
+  91.5 % BMS at 06:50, the real charge ended at 88.5 %.
+- The message tells this instead of "Задай: …", in car-screen %:
+  "Зарежда сега на средно от 21:25. Без промяна: около 91 % на екрана в
+  06:00, 96 % на екрана в 06:50 (нужни 89 %)."
+- When the reach at departure is below the target, it adds the lowest faster
+  level that reaches it (else high): "Не стига: смени на високо."
+- When the charge started before the zone, or runs past its end before
+  departure and before 100 %, it adds "Част от зареждането е в дневна тарифа."
+- The planned fields (`level`, `start`, `end`) stay as without a running
+  charge.
+- JSON fields (BMS %): `charging_now` (true/false), `now_level` (low, mid,
+  high), `now_since` (ISO time), `reach_zone_end`, `reach_departure`; null
+  when no charge runs. Advice on request gives them too, from the charge
+  seen at the last recompute.
+
 ## Advice on request
 
 A client in the car asks `GET /advice?soc=…&km_home=…` while it drives home,
