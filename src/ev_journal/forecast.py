@@ -32,7 +32,9 @@ MIN_GAIN = 0.015  # a key is added only if it lowers the normal-day error by thi
 # The defaults until the home charges teach better ones (levels(), #36).
 LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.60), ("high", 2.64, 2.34)]
 MIN_LEVEL_CHARGES = 2  # a level is learned from this many home charges at it
-MIN_LEVEL_HOURS = 1.0  # only charges with at least this much time at power teach a level
+# Only charges with at least this much time at power teach a level. Short
+# top-ups read too low: rounded kWh and SoC, and less power in the first minutes (#60).
+MIN_LEVEL_HOURS = 3.0
 # The car screen shows a display % that is not the BMS %: display = a + b × BMS.
 # The default is the line through 38.5 → 39.5 and 84.5 → 88.5 (2026-11-08/09, #36).
 DISPLAY = (-1.51, 49 / 46)
@@ -61,14 +63,24 @@ def level_rates(hc) -> dict[str, list[float]]:
 
 def levels(hc) -> list[tuple[str, float, float]]:
     """LEVELS with the battery kW learned from home charges: the median of
-    a level's charges; with too few it keeps the default."""
+    a level's charges. A level with too few charges is scaled by meter kW
+    from the learned level nearest to it in meter kW (#60); with no learned
+    level at all it keeps the default."""
     by = level_rates(hc)
-    return [
-        (name, meter_kw, statistics.median(by[name]))
+    learned = {
+        name: (meter_kw, statistics.median(by[name]))
+        for name, meter_kw, _kw in LEVELS
         if len(by.get(name, ())) >= MIN_LEVEL_CHARGES
-        else (name, meter_kw, kw)
-        for name, meter_kw, kw in LEVELS
-    ]
+    }
+    out = []
+    for name, meter_kw, kw in LEVELS:
+        if name in learned:
+            kw = learned[name][1]
+        elif learned:
+            ref_meter, ref_kw = min(learned.values(), key=lambda v: abs(v[0] - meter_kw))
+            kw = meter_kw * ref_kw / ref_meter
+        out.append((name, meter_kw, kw))
+    return out
 
 
 def display_map(pairs: list[tuple[float, float]]) -> tuple[float, float]:

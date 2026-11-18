@@ -501,10 +501,41 @@ def test_levels_are_learned_from_home_charges():
     hc = [_night(15.4, 14.3, 8.0), _night(15.5, 14.3, 8.0), _night(9.8, 7.4, 8.0)]
     lv = dict((name, kw) for name, _m, kw in forecast.levels(hc))
     assert lv["mid"] == pytest.approx(1.79, abs=0.01)
-    # One charge is not enough: low keeps its default; high has none.
-    assert lv["low"] == 0.92 and lv["high"] == 2.34
+    # One charge is not enough: low and high are scaled from mid by meter kW (#60).
+    assert lv["low"] == pytest.approx(1.22 * 1.79 / 1.93, abs=0.01)
+    assert lv["high"] == pytest.approx(2.64 * 1.79 / 1.93, abs=0.01)
     # Short charges teach nothing.
     assert forecast.levels([_night(1.9, 1.5, 0.5)] * 3) == forecast.LEVELS
+
+
+# Made-up charges like those of #60: 3 short top-ups at high, 7 long nights at mid.
+SHORT_HIGH = [_night(4.28, 3.40, 1.63), _night(3.41, 2.10, 1.32), _night(3.47, 2.60, 1.33)]
+LONG_MID = [_night(1.93 * h, 1.721 * h, h) for h in (6.0, 6.5, 7.0, 7.5, 8.0, 9.0, 9.5)]
+
+
+def test_short_charges_do_not_teach_high():
+    lv = dict((name, kw) for name, _m, kw in forecast.levels(SHORT_HIGH + LONG_MID))
+    assert lv["mid"] == pytest.approx(1.721, abs=0.001)
+    # Not 1.95 from the top-ups: 2.64 × 1.721 / 1.93 (the mid ratio).
+    assert lv["high"] == pytest.approx(2.35, abs=0.05)
+
+
+def test_long_charges_keep_low_and_mid():
+    low = [_night(1.22 * h, 0.967 * h, h) for h in (3.0, 5.0, 7.0, 8.0)]
+    lv = dict((name, kw) for name, _m, kw in forecast.levels(low + LONG_MID + SHORT_HIGH))
+    assert lv["low"] == pytest.approx(0.967, abs=0.001)
+    assert lv["mid"] == pytest.approx(1.721, abs=0.001)
+
+
+def test_the_night_of_2026_11_16():
+    # 38.5 % → 85 % BMS, 0.306 kWh per %: 46.5 % = 14.2 kWh, 6.05 h at high 2.35 kW.
+    lv = forecast.levels(SHORT_HIGH + LONG_MID)
+    zone = night_zone(date(2026, 11, 16), UTC)
+    dep = at(date(2026, 11, 17), 6, 50)  # after the zone: the charge ends at 06:00
+    a = advise(38.5, 74 * 0.306, 0.306, zone, dep, 10, step_min=10, levels=lv)
+    assert (a.target, a.level) == (85, "high")
+    assert a.end == at(date(2026, 11, 17), 6)
+    assert abs(a.start - at(date(2026, 11, 16), 23, 50)) <= timedelta(minutes=10)
 
 
 def test_the_night_of_2026_11_08():

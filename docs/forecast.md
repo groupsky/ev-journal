@@ -169,11 +169,17 @@ Left out for now:
 - **Level**: the lowest of the car's three AC levels that reaches the target
   in time. The battery kW of each level is learned from the home charges
   ([#36](https://github.com/groupsky/ev-journal/issues/36)): a charge with at
-  least 1 h at power belongs to the level whose house-meter kW (1.22 / 1.93 /
+  least 3 h at power belongs to the level whose house-meter kW (1.22 / 1.93 /
   2.64) is nearest to its meter kWh per hour at power; its battery kW is
   battery kWh per hour at power; a level takes the median of its charges.
-  With fewer than 2 charges a level keeps its default: 0.92 / 1.60 / 2.34 kW
-  battery side (low / mid / high, 661 sessions). The default for mid was
+  Shorter charges teach nothing
+  ([#60](https://github.com/groupsky/ev-journal/issues/60)): on a top-up of
+  1–2 h the battery kWh is rounded to 0.1 kWh and the SoC to 0.5 %, and the
+  power is lower in the first minutes, so it reads 5–15 % too low. A level
+  with fewer than 2 long charges is scaled from the learned level nearest to
+  it in meter kW: battery kW = its meter kW × (battery kW / meter kW of that
+  level). For high that is mid. With no learned level at all, the defaults
+  stay: 0.92 / 1.60 / 2.34 kW battery side (low / mid / high, 661 sessions). The default for mid was
   too low: one 8 h night at mid put 1.79 kW into the battery. `dry-run`
   prints the learned kW, and the kW per level of each month, so a season
   or temperature effect shows. No outside temperature is read yet. The time is rounded up to
