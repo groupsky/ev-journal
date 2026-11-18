@@ -64,6 +64,7 @@ From the GPS track (real fixes only, accuracy 50 m or better), or from speed ove
 - **Route**: a name and an ordered list of place ids. A route is a plan, not history. A journey that follows a route gets the route's name. Route statistics (km, minutes, kWh by temperature) feed the forecast.
 - **New places**: frequent stops without a name are offered for naming.
 - **Command log**: the assistant POSTs each voice command, with an offline queue. A navigate or multi-stop command gives the journey's plan at its start.
+- **Proxy for the car** (#70): the car asks ev-journal for road weather and Google Routes, so the Xweather and Google keys stay on the server. The car has its own token, which may call only the proxy and the GETs it reads. Proxy calls have a rate limit per token ([api.md](api.md#proxy-for-the-car)).
 
 ## Upkeep
 

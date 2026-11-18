@@ -48,6 +48,9 @@ environment points to.
 | `EVJ_TYRE_SWAP_C` | the season line for the tyre swap hint, °C | `7` |
 | `EVJ_TYRE_SWAP_DAYS` | days with a reading that the swap hint averages | `7` |
 | `EVJ_XWEATHER_ID_FILE`, `EVJ_XWEATHER_SECRET_FILE` | files with the Xweather client id and secret; without them there is no road check ([api](docs/api.md#road-check)) | — |
+| `EVJ_CAR_TOKEN_FILE` | file with the car token: only the proxy and the GETs the car reads ([api](docs/api.md#auth)) | — |
+| `EVJ_GOOGLE_ROUTES_KEY_FILE` | file with a Google key for the Routes API; without it `POST /proxy/routes` gives `503` ([api](docs/api.md#proxy-for-the-car)) | — |
+| `EVJ_PROXY_PER_MIN`, `EVJ_PROXY_PER_DAY` | proxy calls per token a minute and a UTC day | `20`, `1000` |
 | `EVJ_ROAD_LEAD_MIN` | the road check runs this many minutes before the next likely trip's window | `45` |
 | `EVJ_ROAD_RESERVE` | Xweather accesses to keep: below this the check is skipped (the quota is shared with the car app) | `1000` |
 | `EVJ_ROAD_KMH` | mean speed along the way, to know when the car passes each point | `50` |
