@@ -25,13 +25,33 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ev_journal import charges, forecast, heating, tyres, upkeep, ways
+from ev_journal import charges, forecast, heating, proxy, tyres, upkeep, ways
 from ev_journal import places as store
 from ev_journal.geo import dist_m
 
 Kind = Literal["home", "work", "station", "other"]
 SUGGEST_RADIUS_M = 100.0
 SUGGEST_MIN_VISITS = 3
+PROXY_MAX_POINTS = 500
+# What the car token may call (#70): the proxy and the GETs the car reads.
+CAR_ROUTES = {
+    ("POST", "/proxy/road"),
+    ("POST", "/proxy/routes"),
+    *(
+        ("GET", path)
+        for path in (
+            "/places",
+            "/advice",
+            "/journeys",
+            "/journeys/days",
+            "/journeys/{journey_id}/track",
+            "/upkeep",
+            "/tyres",
+            "/health/daily",
+            "/health/fan",
+        )
+    ),
+}
 
 
 class Error(BaseModel):
@@ -301,6 +321,65 @@ class RoadCheck(BaseModel):
     quota_left: int | None = Field(description="Xweather accesses left this period.")
 
 
+class RoadPointIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    at: datetime = Field(description="When the car expects to pass, with a time zone.")
+
+    @field_validator("at")
+    @classmethod
+    def _aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("needs a time zone")
+        return v
+
+
+class RoadIn(BaseModel):
+    points: list[RoadPointIn] = Field(min_length=1, max_length=PROXY_MAX_POINTS)
+
+
+class RoadPoint(BaseModel):
+    level: str | None = Field(description="GREEN, YELLOW or RED. Null: not known.")
+    what: list[str] = Field(
+        description="Road data: the surface (ice, snow, slush, wet, ...); estimate: ice, fog."
+    )
+    at: str = Field(description="The time of the point, local time.")
+    source: str = Field(
+        description="road (Xweather road data), estimate (Open-Meteo) or none (not known)."
+    )
+
+
+class RoadAnswer(BaseModel):
+    points: list[RoadPoint] = Field(description="One per point sent, in the same order.")
+    quota_left: int | None = Field(description="Xweather accesses left this period.")
+    skipped: str | None = Field(description="As in GET /road-check.")
+
+
+class LatLon(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+class RoutesIn(BaseModel):
+    origin: LatLon
+    destination: LatLon
+    departure: datetime | None = Field(
+        None, description="With a time zone. Null or in the past: now."
+    )
+
+    @field_validator("departure")
+    @classmethod
+    def _aware(cls, v: datetime | None) -> datetime | None:
+        if v is not None and v.tzinfo is None:
+            raise ValueError("needs a time zone")
+        return v
+
+
+class RoutesAnswer(BaseModel):
+    duration_s: int | None = Field(description="Driving time with traffic, s. Null: no route.")
+    distance_m: int | None = Field(description="Distance, m. Null: no route.")
+
+
 class TrackPoint(BaseModel):
     t: int = Field(description="Time of the GPS fix, ms.")
     lat: float
@@ -551,8 +630,8 @@ def suggestions(
 class Fail(Exception):
     """An error answer: {"detail": "..."}."""
 
-    def __init__(self, status: int, detail: str):
-        self.status, self.detail = status, detail
+    def __init__(self, status: int, detail: str, headers: dict | None = None):
+        self.status, self.detail, self.headers = status, detail, headers
 
 
 @contextmanager
@@ -588,6 +667,11 @@ def create_app(
     way_rows: Callable[[], list[dict]] = list,
     rhythm: Callable[[], dict | None] = lambda: None,
     road_check: Callable[[], dict | None] = lambda: None,
+    *,
+    car_token: str | None = None,
+    road_proxy: Callable[[list[tuple[float, float, float]]], dict] | None = None,
+    routes_proxy: Callable[[tuple, tuple, int | None], dict] | None = None,
+    limit: proxy.RateLimit | None = None,
 ) -> FastAPI:
     """stops gives the (t, lat, lon) of journey ends from the last recompute,
     journeys the (start, end) of each journey, advice the last advice,
@@ -601,7 +685,11 @@ def create_app(
     gives the commute journeys of the last recompute (heating.journey_rows).
     way_rows gives the journeys with their place ids and fixes (ways.usual_way),
     rhythm the calendar rhythm of the last forecast (ways.next_trip).
-    road_check gives the last road check (roadcheck.check), or None."""
+    road_check gives the last road check (roadcheck.check), or None.
+    car_token may call only CAR_ROUTES. road_proxy answers POST /proxy/road
+    for (lat, lon, at ms) points and routes_proxy POST /proxy/routes for
+    (origin, destination, departure ms); None: no key, 503. limit counts
+    the proxy calls per token (#70)."""
     tyre_rules = tyre_rules or tyres.Rules()
 
     def db():
@@ -612,17 +700,43 @@ def create_app(
         finally:
             conn.close()
 
+    def same(got: str, want: str | None) -> bool:
+        return bool(want) and hmac.compare_digest(got.encode(), want.encode())
+
     def auth(request: Request):
         scheme, _, got = request.headers.get("authorization", "").partition(" ")
-        ok = scheme.lower() == "bearer" and token
-        if not ok or not hmac.compare_digest(got.strip().encode(), token.encode()):
+        got = got.strip() if scheme.lower() == "bearer" else ""
+        if same(got, token):
+            request.state.who = "full"
+        elif same(got, car_token):
+            request.state.who = "car"
+            route = request.scope.get("route")
+            if (request.method, getattr(route, "path", None)) not in CAR_ROUTES:
+                raise Fail(403, "the car token may not call this")
+        else:
             raise Fail(401, "missing or wrong token")
+
+    def rate(request: Request):
+        if limit is None:
+            return
+        wait = limit.take(request.state.who, time.time())
+        if wait is not None:
+            raise Fail(429, "too many calls", {"Retry-After": str(wait)})
+
+    def outside(call):
+        """Run an outside call; its error is logged (no key, no coordinates
+        in it) and answered as 502."""
+        try:
+            return call()
+        except Exception as e:
+            print(f"ev-journal: proxy call failed: {e}", file=sys.stderr)
+            raise Fail(502, "the outside call failed") from None
 
     app = FastAPI(title="ev-journal", version="1")
 
     @app.exception_handler(Fail)
     def on_fail(_request, e: Fail):
-        return JSONResponse({"detail": e.detail}, status_code=e.status)
+        return JSONResponse({"detail": e.detail}, status_code=e.status, headers=e.headers)
 
     @app.exception_handler(RequestValidationError)
     def on_invalid(_request, e: RequestValidationError):
@@ -631,7 +745,7 @@ def create_app(
 
     r = APIRouter(
         dependencies=[Depends(auth)],
-        responses={401: {"model": Error}, 422: {"model": Error}},
+        responses={401: {"model": Error}, 403: {"model": Error}, 422: {"model": Error}},
     )
     nf = {404: {"model": Error}}
 
@@ -1185,6 +1299,32 @@ def create_app(
             )
             charges.price(conn, question_id)
         return charge_price(conn, question_id)
+
+    px = {429: {"model": Error}, 502: {"model": Error}, 503: {"model": Error}}
+
+    @r.post("/proxy/road", response_model=RoadAnswer, responses=px, dependencies=[Depends(rate)])
+    def post_proxy_road(p: RoadIn):
+        """The road check at the points the car sends, with the server's
+        Xweather key: summary first, detail only where not GREEN, the
+        Open-Meteo estimate where there is no road data (#70)."""
+        if road_proxy is None:
+            raise Fail(503, "no Xweather key")
+        pts = [(q.lat, q.lon, q.at.timestamp() * 1000) for q in p.points]
+        return outside(lambda: road_proxy(pts))
+
+    @r.post(
+        "/proxy/routes", response_model=RoutesAnswer, responses=px, dependencies=[Depends(rate)]
+    )
+    def post_proxy_routes(p: RoutesIn):
+        """Driving time with traffic and distance from Google Routes, with
+        the server's key (#70)."""
+        if routes_proxy is None:
+            raise Fail(503, "no Google Routes key")
+        dep = None if p.departure is None else int(p.departure.timestamp() * 1000)
+        if dep is not None and dep < store.now_ms():
+            dep = None  # Google refuses a departure in the past
+        o, d = (p.origin.lat, p.origin.lon), (p.destination.lat, p.destination.lon)
+        return outside(lambda: routes_proxy(o, d, dep))
 
     @r.get("/advice", response_model=Advice, responses=nf)
     def get_advice(
