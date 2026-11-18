@@ -3,10 +3,15 @@
 import io
 import zipfile
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from ev_journal import forecast, ovms, places
+from ev_journal import __main__ as m
+from ev_journal import forecast, homecharge, ovms, places
+from ev_journal.homecharge import HomeCharge
+from ev_journal.journeys import build
 
 S_HEAD = "rec_time,x,soc,chargestate,chargepower,idealrange\n"
 D_HEAD = "rec_time,x,odometer,speed,tbattery,ambient\n"
@@ -146,3 +151,63 @@ def test_load_home_meter_and_store(tmp_path):
     assert ovms.stored(db) == [c]
     (away,) = ovms.load(zips, [], meter)
     assert not away.at_home and away.meter_kwh is None
+
+
+def hcharge(t, meter_kw, kw, hours, soc0=30.0, kpp=0.3):
+    return HomeCharge(t, meter_kw * hours, kw * hours, soc0, soc0 + kw * hours / kpp, "", hours)
+
+
+def ovms_charge(t, meter_kw, kw, hours, soc0=30.0, kpp=0.3):
+    return ovms.Charge(
+        t, t + int(hours * 3_600_000), hours, soc0, soc0 + kw * hours / kpp,
+        at_home=True, meter_kwh=meter_kw * hours,
+    )  # fmt: skip
+
+
+DAY = 86_400_000
+
+
+def live_charges():
+    """Low and mid nights, and 3 short high top-ups (#60)."""
+    t = ms(2026, 8, 1, 0)
+    out = [hcharge(t + i * DAY, 1.22, 0.92, 6, kpp=0.3 + i * 0.001) for i in range(15)]
+    out += [hcharge(t + (20 + i) * DAY, 1.93, 1.62, 5) for i in range(5)]
+    return out + [hcharge(t + (30 + i) * DAY, 2.64, 1.95, 1.0) for i in range(3)]
+
+
+def models(ov):
+    s = SimpleNamespace(tz="UTC", drift_pct=5.0, drift_kwh=1.0)
+    hc = live_charges()
+    r = build([], [], [], [], ZoneInfo("UTC"))
+    m.charge_models(s, r, hc, ov)
+    return r, hc
+
+
+def long_highs():
+    t = ms(2025, 1, 1, 0)
+    return [ovms_charge(t + i * DAY, 2.64, 2.35, 7) for i in range(6)]
+
+
+def test_high_rate_comes_from_long_ovms_charges():
+    r0, hc = models([])
+    high0 = dict((n, kw) for n, _m, kw in r0.levels)["high"]
+    r, _hc = models(long_highs())
+    high = dict((n, kw) for n, _m, kw in r.levels)["high"]
+    assert high == pytest.approx(2.35)
+    assert high0 != pytest.approx(2.35)  # without them: scaled from mid
+    assert len(r.level_sources["ovms"]) == 6
+    assert "2025-01" in r.level_months  # they join the months too
+
+
+def test_other_models_do_not_change(monkeypatch):
+    r0, hc = models([])
+    seen = []
+    drift = homecharge.drift
+    monkeypatch.setattr(homecharge, "drift", lambda cs, *a: seen.append(cs) or drift(cs, *a))
+    ov = long_highs() + [ovms_charge(ms(2025, 2, 1, 0), 1.22, 0.8, 6, kpp=0.4)]
+    r, _hc = models(ov)
+    assert r.backtest == r0.backtest
+    assert r.soc_model == r0.soc_model
+    assert r.soc_model.kwh_per_pct == homecharge.kwh_per_pct(hc)
+    assert seen == [hc]  # drift() sees the live charges only
+    assert r.levels != r0.levels
