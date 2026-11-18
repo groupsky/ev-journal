@@ -182,7 +182,12 @@ Left out for now:
   stay: 0.92 / 1.60 / 2.34 kW battery side (low / mid / high, 661 sessions). The default for mid was
   too low: one 8 h night at mid put 1.79 kW into the battery. `dry-run`
   prints the learned kW, and the kW per level of each month, so a season
-  or temperature effect shows. No outside temperature is read yet. The time is rounded up to
+  or temperature effect shows. The older home charges from the OVMS daily
+  exports (2024-07 → 2026-03, [#62](https://github.com/groupsky/ev-journal/issues/62))
+  join the level rates and the months, with the same rules; `dry-run`
+  prints the rates and counts of each source (`live`, `ovms`), with the
+  full nights of 5 h or more. Their SoC scale is a guess (screen %, turned
+  into BMS %): see [home-charge.md](home-charge.md), "OVMS exports". No outside temperature is read yet. The time is rounded up to
   the step of the car's charge timer (`EVJ_TIMER_STEP_MIN`, 15 min). The
   start is the end less that time.
 - When even the high level cannot reach the target inside the zone, the

@@ -123,3 +123,57 @@ median is that one month. Battery kWh ÷ E without the overhead (0.810,
 0.831, 0.815, 0.788) flags 2026-10 instead (−3.4 %), the coldest month
 (median 13.5 °C). The limit stays at 3 % for now. Check it again when
 there is a year of data, so every season is in it.
+
+## OVMS exports: older home charges for the level rates
+
+From [#62](https://github.com/groupsky/ev-journal/issues/62). An OVMS module
+in the car sent data to its server until 2026-03-06. The server mailed one
+zip per day (cut at 00:00 UTC) with CSV files. They give many more full
+nights at each level, in cold months too. They are kept privately and
+never enter this repo: they hold GPS tracks.
+
+`ev-journal import-ovms DIR` reads every `*.zip` in a folder (with
+`zipfile`, no unpacking) and writes the charges to the SQLite table
+`ovms_charges`: start, end, hours at power, SoC start and end (BMS %), mean
+`chargepower`, outside and battery temperature at the start, home or away,
+and the meter kWh. Only the home/away label is stored, not the position.
+It reads InfluxDB for the meter and never writes to it. A charge is keyed
+by its start, so a second run with the same zips gives the same rows. On
+routy the zips go in the folder `ovms-export/` in ev-journal's data volume,
+copied there from the owner's copy. Inside the container that is
+`/data/ovms-export` (`EVJ_DATA_DIR` is `/data`), so the command there is
+`ev-journal import-ovms /data/ovms-export`. Then `dry-run` shows the rates.
+
+Files used: `s.csv` (`rec_time`, `soc`, `chargestate`, `chargepower` in kW
+battery side), `d.csv` (`ambient`, `tbattery`), `l.csv` (`latitude`,
+`longitude`, `gpslock`). Rules, learned from the data:
+
+1. `rec_time` is Europe/Berlin time, not local time. In the October hour
+   that repeats, a time that goes back (in file order) is the second pass.
+2. Rows repeat at zip borders: a time is kept once.
+3. `soc` = 0 and `odometer` = 0 rows are wrong values: dropped.
+4. A row counts as charging only with `chargestate` `charging` or `topoff`
+   and `chargepower` > 0.3 kW. Without this, about 14 % of home "charges"
+   are false 20-min charges at 04–06 h with no SoC gain. Any other row ends
+   a part.
+5. A part joins the part before it across a pause shorter than 3 h when
+   the SoC does not fall in between and goes on rising (about 4 % of
+   charges are split by a 20–110 min pause).
+6. SoC start, SoC end and the time come from the same span: the first and
+   the last charging row. The hours at power are the parts; a joined pause
+   is left out. A charge is kept with at least 5 % gained and 1 h at power.
+7. **The SoC scale is not known.** OVMS has one SoC only, and the data cannot
+   tell if it is the BMS % or the car screen %. Charges end at 91–96 % or at
+   exactly 100 (`done`), so it is taken as the screen %, and turned into BMS %
+   with the inverse of the #36 map: BMS = (screen + 1.51) / 1.065. A rate in
+   %/h is divided by 1.065. If it is the BMS % after all, these rates read
+   about 6 % low.
+
+A home charge is one whose last GPS fix with a lock, at or before its end,
+is inside a place of kind `home` (as for live charges). Its meter kWh are
+the house charger meter blocks from 5 min before the start to the end (the
+meter starts 2024-11-16, so earlier charges have none). Battery kWh = BMS %
+gained × the kWh per % of the live charges. These charges teach only the
+level rates and their months ([forecast.md](forecast.md), "Level"). They
+are not used for kWh per %, the model fit, the back-test or the drift: their
+battery kWh come from the live kWh per %, so they would only repeat it.
