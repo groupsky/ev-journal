@@ -608,3 +608,61 @@ def test_start_is_never_after_end():
                 assert a.start >= now
         else:
             assert (a.level, a.start, a.end) == (None, None, None)
+
+
+# A charge that already runs (#61): made-up numbers in the shape of a real night.
+RUN_LEVELS = [("low", 1.22, 0.92), ("mid", 1.93, 1.72), ("high", 2.64, 2.34)]
+RUN_ZONE = night_zone(date(2026, 11, 16), UTC)  # 22:00–06:00
+RUN_SINCE = at(date(2026, 11, 16), 21, 25)
+RUN_DEP = at(date(2026, 11, 17), 6, 50)
+
+
+def run_advice(soc, kw=1.95, bad_kwh=22.0):
+    # 22.0 kWh / 0.306 + 10 % reserve = 81.9 → target 85 %.
+    return advise(
+        soc, bad_kwh, 0.306, RUN_ZONE, RUN_DEP, 10, RUN_SINCE, levels=RUN_LEVELS,
+        running=(kw, RUN_SINCE),
+    )  # fmt: skip
+
+
+def test_a_running_charge_says_its_level_and_reach():
+    a = run_advice(38.5)
+    assert (a.target, a.charging_now, a.now_level, a.now_since) == (85, True, "mid", RUN_SINCE)
+    assert a.reach_zone_end == pytest.approx(87.0, abs=0.5)
+    assert a.reach_departure == pytest.approx(91.5, abs=0.5)
+    assert a.day_tariff and a.change_to is None
+    f = forecast.Forecast(date(2026, 11, 17), "workday", 15.0, 22.0)
+    msg = message(f, 38.5, a, False)
+    assert "Зарежда сега на средно от 21:25." in msg
+    assert "около 91 % на екрана в 06:00, 96 % на екрана в 06:50 (нужни 89 %)." in msg
+    assert "дневна тарифа" in msg
+    assert "Задай" not in msg
+    j = forecast.running_json(a)
+    assert (j["charging_now"], j["now_level"]) == (True, "mid")
+    assert j["now_since"] == RUN_SINCE.isoformat()
+    assert j["reach_departure"] == pytest.approx(91.5, abs=0.5)
+
+
+def test_a_running_charge_that_does_not_reach_says_the_level_to_set():
+    a = run_advice(20.0, kw=1.25)  # low: 20 + 9.4 h × 0.92 / 0.306 = 48 %
+    assert (a.now_level, a.change_to) == ("low", "high")  # mid reaches 73 %, high 92 %
+    f = forecast.Forecast(date(2026, 11, 17), "workday", 15.0, 22.0)
+    assert "Не стига: смени на високо." in message(f, 20.0, a, False)
+
+
+def test_no_running_charge_keeps_the_message():
+    a = advise(20, 6.0, KPP, WINTER, None, 10)
+    assert not a.charging_now
+    assert forecast.running_json(a) == {
+        "charging_now": False,
+        "now_level": None,
+        "now_since": None,
+        "reach_zone_end": None,
+        "reach_departure": None,
+    }
+    f = forecast.Forecast(date(2026, 1, 13), "workday", 4.0, 6.0)
+    assert message(f, 20, a, False) == (
+        "Утре: около 4 kWh (лош ден 6). Сега 20 % на екрана."
+        " Нужни 30 % на екрана при тръгване."
+        " Задай: ниско, 02:30–06:00."
+    )

@@ -212,6 +212,8 @@ def live(
     return {
         "running": running,
         "since": bs[0].start,
+        "block_start": last.start,  # the running block (#61)
+        "kw_now": last.kw,
         "soc_plugin": soc_plugin,
         "soc_now": soc,
         "meter_kwh": meter,

@@ -12,6 +12,11 @@
             "title": "Capped",
             "type": "boolean"
           },
+          "charging_now": {
+            "default": false,
+            "title": "Charging Now",
+            "type": "boolean"
+          },
           "computed_at": {
             "anyOf": [
               {
@@ -77,9 +82,58 @@
             "title": "Normal Kwh",
             "type": "number"
           },
+          "now_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "mid",
+                  "high"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now Level"
+          },
+          "now_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now Since"
+          },
           "preheat_off": {
             "title": "Preheat Off",
             "type": "boolean"
+          },
+          "reach_departure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reach Departure"
+          },
+          "reach_zone_end": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reach Zone End"
           },
           "score": {
             "additionalProperties": {
