@@ -11,8 +11,8 @@ only on the private network.
 ## Auth
 
 Every request needs `Authorization: Bearer <token>`. The token is the content
-of `EVJ_API_TOKEN_FILE`, outside the repo. Without a configured token every
-request gets `401`.
+of `EVJ_API_TOKEN_FILE`, outside the repo (or the car token below). A
+missing or wrong token gets `401`.
 
 **The car token** is the content of `EVJ_CAR_TOKEN_FILE` (optional). It may
 call only the proxy (`POST /proxy/road`, `POST /proxy/routes`) and these
