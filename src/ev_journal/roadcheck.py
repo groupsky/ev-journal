@@ -364,7 +364,9 @@ def _iso(ms: float, tz) -> str:
     return datetime.fromtimestamp(ms / 1000, tz).isoformat(timespec="minutes")
 
 
-def urllib_fetch(url: str, body: list | None = None, timeout: float = 30) -> tuple[dict, object]:
+def urllib_fetch(
+    url: str, body: list | dict | None = None, headers: dict | None = None, timeout: float = 30
+) -> tuple[dict, object]:
     """POST JSON when body is given, else GET. Returns (headers, JSON)."""
     import urllib.request
 
@@ -372,5 +374,7 @@ def urllib_fetch(url: str, body: list | None = None, timeout: float = 30) -> tup
     req = urllib.request.Request(url, data=data, method="GET" if body is None else "POST")
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return dict(r.headers.items()), json.loads(r.read())
