@@ -339,6 +339,9 @@ off at the same moment.
 recompute, the same object as `advice` in the MQTT summary
 ([forecast.md](forecast.md)). `404` before the first recompute, or when
 there is no forecast (too little history, or no SoC known).
+When the car charges now, `charging_now`, `now_level`, `now_since`,
+`reach_zone_end` and `reach_departure` tell the running charge
+([forecast.md](forecast.md#a-charge-that-runs-now)).
 
 `GET /advice?soc=<SoC % now>&km_home=<km to home>`: the same advice made
 again on request, for a client in the car on the way home

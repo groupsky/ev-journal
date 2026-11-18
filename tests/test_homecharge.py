@@ -95,6 +95,7 @@ def test_live():
     now = bs[-1].end + MIN
     h = live(bs, 30.0, m, now, 80)
     assert h["running"]
+    assert (h["kw_now"], h["block_start"]) == (1.2, bs[-1].start)  # the running block (#61)
     assert live(bs, 30.0, m, now + 3 * MIN, 80)["running"]  # the meter data comes late
     assert abs(h["meter_kwh"] - 2.4) < 0.02
     assert abs(h["soc_now"] - (30 + 1.4 * 0.9 / 0.3)) < 0.1
@@ -112,6 +113,7 @@ def test_live_holds_a_short_later_block():
     bs = blocks(minutes([(120, 1200), (60, 0), (20, 1200)]))
     h = live(bs, 30.0, m, bs[-1].end + MIN, 80)
     assert abs(h["meter_kwh"] - 2.4) < 0.02  # the 20 min block may be preheat
+    assert h["kw_now"] is None  # so it is not a running charge (#61)
 
 
 def test_outputs():

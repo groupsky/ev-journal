@@ -140,6 +140,10 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
         return
     soc = r.home_charge["soc_now"] if r.home_charge else source.last_soc(db, now)
     kpp = r.soc_model.kwh_per_pct if r.soc_model else homecharge.DEFAULT_KWH_PER_PCT
+    hc = r.home_charge
+    running = None
+    if hc and hc["kw_now"] is not None:  # the meter shows a charge now (#61)
+        running = (hc["kw_now"], datetime.fromtimestamp(hc["block_start"] / 1000, tz))
     r.advice = forecast.plan(
         r,
         tz,
@@ -155,6 +159,7 @@ def advice(s: Settings, db: Influx, r: Result) -> None:
         s.timer_step_min,
         r.levels or forecast.LEVELS,
         forecast.display_map(source.soc_pairs(db, now - 90 * 86_400_000)),
+        running,
     )
 
 

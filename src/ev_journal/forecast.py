@@ -378,6 +378,16 @@ class Advice:
     end: datetime | None = None
     capped: bool = False  # the night zone cannot reach the wanted target
     # capped with no level: no time is left in the night zone (#41)
+    # A charge that already runs (#61): its level, start and the BMS % it
+    # reaches if it is not stopped, at the zone end and at departure.
+    charging_now: bool = False
+    now_level: str | None = None
+    now_since: datetime | None = None
+    reach_zone_end: float | None = None
+    reach_departure: float | None = None
+    reach_at: tuple[datetime, datetime] | None = None  # the zone end and departure
+    day_tariff: bool = False  # part of the running charge is outside the night zone
+    change_to: str | None = None  # the level to set, when the running one does not reach
 
 
 def advise(
@@ -390,10 +400,52 @@ def advise(
     now: datetime | None = None,
     step_min: int = STEP_MIN,
     levels=LEVELS,
+    running: tuple[float, datetime] | None = None,
 ) -> Advice:
     """The lowest level that reaches the target inside the night zone, ending
     as close to departure as the zone allows. The charge starts no earlier
-    than now. Sums are in UTC, so the nights the clocks change are right."""
+    than now. Sums are in UTC, so the nights the clocks change are right.
+
+    running: (meter kW now, start of the running block) when the meter
+    shows a charge now (#61)."""
+    a = _advise(soc_now, bad_kwh, kwh_per_pct, zone, departure, reserve_pct, now, step_min, levels)
+    if running is not None:
+        _running(a, soc_now, kwh_per_pct, zone, departure, now, levels, *running)
+    return a
+
+
+def _running(a, soc_now, kwh_per_pct, zone, departure, now, levels, meter_kw, since) -> None:
+    """Fill the fields of a running charge: the level nearest to its meter kW,
+    and what it reaches from soc_now at now if it is not stopped."""
+    t0 = (now or since).astimezone(UTC)
+    by_meter = sorted(levels, key=lambda lv: lv[1])
+    name, meter, kw = min(by_meter, key=lambda lv: abs(lv[1] - meter_kw))
+
+    def reach(t: datetime, kw: float = kw) -> float:
+        hours = max((t.astimezone(UTC) - t0).total_seconds() / 3600, 0.0)
+        return min(soc_now + hours * kw / kwh_per_pct, 100.0)
+
+    z0, z1 = zone
+    end = departure if departure is not None else z1
+    tz = z1.tzinfo
+    a.charging_now, a.now_level, a.now_since = True, name, since.astimezone(tz)
+    # A time already past has no reach.
+    a.reach_zone_end = reach(z1) if z1 > t0 else None
+    a.reach_departure = reach(end) if end > t0 else None
+    a.reach_at = (z1, end.astimezone(tz))
+    full = t0 + timedelta(hours=max(100.0 - soc_now, 0.0) * kwh_per_pct / kw)
+    a.day_tariff = since < z0 or min(full, end) > z1
+    if a.reach_departure is not None and a.reach_departure < a.target:
+        faster = [lv for lv in by_meter if lv[1] > meter]
+        a.change_to = next(
+            (lv[0] for lv in faster if reach(end, lv[2]) >= a.target),
+            faster[-1][0] if faster else None,
+        )
+
+
+def _advise(
+    soc_now, bad_kwh, kwh_per_pct, zone, departure, reserve_pct, now, step_min, levels
+) -> Advice:
     want = bad_kwh / kwh_per_pct + reserve_pct
     target = min(math.ceil(want / TARGET_STEP) * TARGET_STEP, 100)
     if soc_now >= target:
@@ -436,7 +488,9 @@ def message(
         s = f"При пристигане около {now:.0f} % на екрана. " + s
     else:
         s += f" Сега {now:.0f} % на екрана."
-    if a.level is None and a.capped:
+    if a.charging_now:
+        s += _running_text(a, disp)
+    elif a.level is None and a.capped:
         s += " Не остава време за зареждане в нощната зона."
     elif a.level is None:
         s += " Не е нужно зареждане тази вечер."
@@ -449,6 +503,24 @@ def message(
             s += " Повече не се достига в нощната зона."
     if preheat_off:
         s += " Утре е почивен ден: изключи затоплянето."
+    return s
+
+
+def _running_text(a: Advice, disp: tuple[float, float]) -> str:
+    """The message part of a running charge (#61), in car-screen %."""
+    z1, dep = a.reach_at
+    s = f" Зарежда сега на {LEVEL_BG[a.now_level]} от {a.now_since:%H:%M}."
+    if a.reach_departure is None:  # departure is past
+        return s
+    s += " Без промяна: около"
+    if dep != z1 and a.reach_zone_end is not None:
+        s += f" {on_screen(a.reach_zone_end, disp):.0f} % на екрана в {z1:%H:%M},"
+    s += f" {on_screen(a.reach_departure, disp):.0f} % на екрана в {dep:%H:%M}"
+    s += f" (нужни {on_screen(a.target, disp):.0f} %)."
+    if a.reach_departure < a.target:
+        s += f" Не стига: смени на {LEVEL_BG[a.change_to]}." if a.change_to else " Не стига."
+    if a.day_tariff:
+        s += " Част от зареждането е в дневна тарифа."
     return s
 
 
@@ -477,6 +549,7 @@ def plan(
     step_min: int = STEP_MIN,
     levels=LEVELS,
     disp: tuple[float, float] = DISPLAY,
+    running: tuple[float, datetime] | None = None,
 ) -> dict | None:
     """Fill r.forecasts (the scored last days) and return the advice for the
     next morning: tomorrow in the evening, today after midnight.
@@ -517,7 +590,9 @@ def plan(
     hhmm = (departures or {}).get(f.day_type, departure)
     dep = datetime.combine(day, time.fromisoformat(hhmm), tz) if hhmm else None
     zone = night_zone(day - timedelta(days=1), tz)
-    a = advise(soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min, levels)
+    a = advise(
+        soc_now, f.bad_kwh, kwh_per_pct, zone, dep, reserve_pct, local, step_min, levels, running
+    )
     preheat_off = preheat and f.day_type == "holiday"
     out = {
         "day": day.isoformat(),
@@ -532,6 +607,7 @@ def plan(
         "departure": dep.isoformat() if dep else None,
         "capped": a.capped,
         "preheat_off": preheat_off,
+        **running_json(a),
         "message": message(f, soc_now, a, preheat_off, disp=disp),
         "effects": [
             {"key": k, "value": v[1], "effect_kwh": round(e, 1)}
@@ -552,6 +628,17 @@ def plan(
         "kwh_per_km": kwh_per_km(r, now),
     }
     return out
+
+
+def running_json(a: Advice) -> dict:
+    """The advice JSON fields of a running charge (#61); BMS %."""
+    return {
+        "charging_now": a.charging_now,
+        "now_level": a.now_level,
+        "now_since": a.now_since.isoformat() if a.now_since else None,
+        "reach_zone_end": None if a.reach_zone_end is None else round(a.reach_zone_end, 1),
+        "reach_departure": None if a.reach_departure is None else round(a.reach_departure, 1),
+    }
 
 
 def kwh_per_km(r: Result, now: int, days: int = POOL_DAYS) -> float:
@@ -583,7 +670,7 @@ def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetim
         now,
         ctx["step_min"],
         ctx.get("levels", LEVELS),
-    )
+    )  # no running charge: the car is on the way home
     return {
         **base,
         "soc_now": round(soc, 1),
@@ -594,6 +681,7 @@ def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetim
         "start": a.start.isoformat() if a.start else None,
         "end": a.end.isoformat() if a.end else None,
         "capped": a.capped,
+        **running_json(a),
         "message": message(
             f, arrival, a, base["preheat_off"], arrival=True, disp=ctx.get("disp", DISPLAY)
         ),

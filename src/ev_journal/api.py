@@ -62,6 +62,13 @@ class Advice(BaseModel):
     message: str
     score: dict[str, Score]
     soc_arrival: float | None = None  # only with soc or km_home (#27)
+    # A charge that runs now (#61): its level, since when, and the BMS % it
+    # reaches if it is not stopped, at the end of the night zone and at departure.
+    charging_now: bool = False
+    now_level: Literal["low", "mid", "high"] | None = None
+    now_since: str | None = None
+    reach_zone_end: float | None = None
+    reach_departure: float | None = None
     computed_at: str | None = None
 
 
