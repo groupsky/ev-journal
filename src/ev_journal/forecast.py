@@ -429,11 +429,13 @@ def _running(a, soc_now, kwh_per_pct, zone, departure, now, levels, meter_kw, si
     end = departure if departure is not None else z1
     tz = z1.tzinfo
     a.charging_now, a.now_level, a.now_since = True, name, since.astimezone(tz)
-    a.reach_zone_end, a.reach_departure = reach(z1), reach(end)
+    # A time already past has no reach.
+    a.reach_zone_end = reach(z1) if z1 > t0 else None
+    a.reach_departure = reach(end) if end > t0 else None
     a.reach_at = (z1, end.astimezone(tz))
     full = t0 + timedelta(hours=max(100.0 - soc_now, 0.0) * kwh_per_pct / kw)
     a.day_tariff = since < z0 or min(full, end) > z1
-    if a.reach_departure < a.target:
+    if a.reach_departure is not None and a.reach_departure < a.target:
         faster = [lv for lv in by_meter if lv[1] > meter]
         a.change_to = next(
             (lv[0] for lv in faster if reach(end, lv[2]) >= a.target),
@@ -507,8 +509,11 @@ def message(
 def _running_text(a: Advice, disp: tuple[float, float]) -> str:
     """The message part of a running charge (#61), in car-screen %."""
     z1, dep = a.reach_at
-    s = f" Зарежда сега на {LEVEL_BG[a.now_level]} от {a.now_since:%H:%M}. Без промяна: около"
-    if dep != z1:
+    s = f" Зарежда сега на {LEVEL_BG[a.now_level]} от {a.now_since:%H:%M}."
+    if a.reach_departure is None:  # departure is past
+        return s
+    s += " Без промяна: около"
+    if dep != z1 and a.reach_zone_end is not None:
         s += f" {on_screen(a.reach_zone_end, disp):.0f} % на екрана в {z1:%H:%M},"
     s += f" {on_screen(a.reach_departure, disp):.0f} % на екрана в {dep:%H:%M}"
     s += f" (нужни {on_screen(a.target, disp):.0f} %)."
@@ -621,7 +626,6 @@ def plan(
         "levels": levels,
         "disp": disp,
         "kwh_per_km": kwh_per_km(r, now),
-        "running": running,
     }
     return out
 
@@ -632,8 +636,8 @@ def running_json(a: Advice) -> dict:
         "charging_now": a.charging_now,
         "now_level": a.now_level,
         "now_since": a.now_since.isoformat() if a.now_since else None,
-        "reach_zone_end": round(a.reach_zone_end, 1) if a.charging_now else None,
-        "reach_departure": round(a.reach_departure, 1) if a.charging_now else None,
+        "reach_zone_end": None if a.reach_zone_end is None else round(a.reach_zone_end, 1),
+        "reach_departure": None if a.reach_departure is None else round(a.reach_departure, 1),
     }
 
 
@@ -666,8 +670,7 @@ def on_request(ctx: dict, soc: float | None, km_home: float | None, now: datetim
         now,
         ctx["step_min"],
         ctx.get("levels", LEVELS),
-        ctx.get("running"),
-    )
+    )  # no running charge: the car is on the way home
     return {
         **base,
         "soc_now": round(soc, 1),

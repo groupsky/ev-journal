@@ -666,3 +666,14 @@ def test_no_running_charge_keeps_the_message():
         " Нужни 30 % на екрана при тръгване."
         " Задай: ниско, 02:30–06:00."
     )
+
+
+def test_a_running_charge_after_departure_gives_no_reach():
+    late = at(date(2026, 11, 17), 7, 10)
+    a = advise(
+        90, 22.0, 0.306, RUN_ZONE, RUN_DEP, 10, late, levels=RUN_LEVELS,
+        running=(1.95, RUN_SINCE),
+    )  # fmt: skip
+    assert a.charging_now and a.reach_zone_end is None and a.reach_departure is None
+    f = forecast.Forecast(date(2026, 11, 17), "workday", 15.0, 22.0)
+    assert message(f, 90, a, False).endswith("Зарежда сега на средно от 21:25.")

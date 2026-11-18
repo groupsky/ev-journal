@@ -212,8 +212,9 @@ def live(
     return {
         "running": running,
         "since": bs[0].start,
-        "block_start": last.start,  # the running block (#61)
-        "kw_now": last.kw,
+        # The running block (#61); None while it may be preheat.
+        "block_start": last.start if running and done is bs else None,
+        "kw_now": last.kw if running and done is bs else None,
         "soc_plugin": soc_plugin,
         "soc_now": soc,
         "meter_kwh": meter,

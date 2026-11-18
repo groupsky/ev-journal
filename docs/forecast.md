@@ -206,7 +206,9 @@ delay timer ([#61](https://github.com/groupsky/ev-journal/issues/61)). The
 house meter shows it (the live home charge, [home-charge.md](home-charge.md)).
 
 - **Level**: the one whose meter kW is nearest to the meter power now.
-- **Since**: the first minute of the running meter block.
+- **Since**: the first minute of the running meter block. A short last
+  block that may be preheat (40 min or less, after an earlier block) is not
+  a running charge.
 - **Reach** if it is not stopped: SoC now + hours from now × the level's
   battery kW ÷ kWh per %, at most 100 %. Once at the end of the night zone,
   once at departure (the zone end when there is no departure).
@@ -220,12 +222,15 @@ house meter shows it (the live home charge, [home-charge.md](home-charge.md)).
   level that reaches it (else high): "Не стига: смени на високо."
 - When the charge started before the zone, or runs past its end before
   departure and before 100 %, it adds "Част от зареждането е в дневна тарифа."
+- A time already past (the zone end, or departure) has no reach and is left
+  out of the message.
 - The planned fields (`level`, `start`, `end`) stay as without a running
-  charge.
+  charge, so they can differ from the message. A client shows the message,
+  or the running fields when `charging_now` is true.
 - JSON fields (BMS %): `charging_now` (true/false), `now_level` (low, mid,
   high), `now_since` (ISO time), `reach_zone_end`, `reach_departure`; null
-  when no charge runs. Advice on request gives them too, from the charge
-  seen at the last recompute.
+  when no charge runs or the time is past. Advice on request is for a car on
+  the way home, so there `charging_now` is false.
 
 ## Advice on request
 
